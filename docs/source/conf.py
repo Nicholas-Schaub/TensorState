@@ -50,6 +50,9 @@ add_module_names = False
 
 html_sidebars = { '**': ['globaltoc.html', 'relations.html', 'sourcelink.html', 'searchbox.html'] }
 
+# Mock imports to autobuild
+autodoc_mock_imports = ["zarr"]
+
 # -- Options for HTML output -------------------------------------------------
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
