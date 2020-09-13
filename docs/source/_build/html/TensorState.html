@@ -1,0 +1,353 @@
+
+
+<!DOCTYPE html>
+<html class="writer-html5" lang="en" >
+<head>
+  <meta charset="utf-8">
+  
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  
+  <title>TensorState package &mdash; TensorState 0.0.1-a1 documentation</title>
+  
+
+  
+  <link rel="stylesheet" href="_static/css/theme.css" type="text/css" />
+  <link rel="stylesheet" href="_static/pygments.css" type="text/css" />
+
+  
+  
+  
+  
+
+  
+  <!--[if lt IE 9]>
+    <script src="_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  
+    
+      <script type="text/javascript" id="documentation_options" data-url_root="./" src="_static/documentation_options.js"></script>
+        <script src="_static/jquery.js"></script>
+        <script src="_static/underscore.js"></script>
+        <script src="_static/doctools.js"></script>
+        <script src="_static/language_data.js"></script>
+    
+    <script type="text/javascript" src="_static/js/theme.js"></script>
+
+    
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="prev" title="&lt;no title&gt;" href="Installation.html" /> 
+</head>
+
+<body class="wy-body-for-nav">
+
+   
+  <div class="wy-grid-for-nav">
+    
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          
+
+          
+            <a href="index.html" class="icon icon-home" alt="Documentation Home"> TensorState
+          
+
+          
+          </a>
+
+          
+            
+            
+          
+
+          
+<div role="search">
+  <form id="rtd-search-form" class="wy-form" action="search.html" method="get">
+    <input type="text" name="q" placeholder="Search docs" />
+    <input type="hidden" name="check_keywords" value="yes" />
+    <input type="hidden" name="area" value="default" />
+  </form>
+</div>
+
+          
+        </div>
+
+        
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="main navigation">
+          
+            
+            
+              
+            
+            
+              <ul class="current">
+<li class="toctree-l1 current"><a class="current reference internal" href="#">TensorState package</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="#tensorstate-tensorstate-module">TensorState.TensorState module</a></li>
+</ul>
+</li>
+</ul>
+
+            
+          
+        </div>
+        
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+
+      
+      <nav class="wy-nav-top" aria-label="top navigation">
+        
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="index.html">TensorState</a>
+        
+      </nav>
+
+
+      <div class="wy-nav-content">
+        
+        <div class="rst-content">
+        
+          
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<div role="navigation" aria-label="breadcrumbs navigation">
+
+  <ul class="wy-breadcrumbs">
+    
+      <li><a href="index.html" class="icon icon-home"></a> &raquo;</li>
+        
+      <li>TensorState package</li>
+    
+    
+      <li class="wy-breadcrumbs-aside">
+        
+            
+            <a href="_sources/TensorState.rst.txt" rel="nofollow"> View page source</a>
+          
+        
+      </li>
+    
+  </ul>
+
+  
+  <hr/>
+</div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+           <div itemprop="articleBody">
+            
+  <div class="section" id="tensorstate-package">
+<h1>TensorState package<a class="headerlink" href="#tensorstate-package" title="Permalink to this headline">¶</a></h1>
+<div class="section" id="tensorstate-tensorstate-module">
+<h2>TensorState.TensorState module<a class="headerlink" href="#tensorstate-tensorstate-module" title="Permalink to this headline">¶</a></h2>
+<p>Description of core functionality.</p>
+<span class="target" id="module-TensorState.TensorState"></span><dl class="py class">
+<dt id="TensorState.TensorState.TensorState">
+<em class="property">class </em><code class="sig-name descname">TensorState</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">name</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="n">disk_path</span><span class="o">=</span><span class="default_value">None</span></em>, <em class="sig-param"><span class="o">**</span><span class="n">kwargs</span></em><span class="sig-paren">)</span><a class="headerlink" href="#TensorState.TensorState.TensorState" title="Permalink to this definition">¶</a></dt>
+<dd><p>Bases: <code class="xref py py-class docutils literal notranslate"><span class="pre">tensorflow.python.keras.engine.base_layer.Layer</span></code></p>
+<dl class="py method">
+<dt id="TensorState.TensorState.TensorState.build">
+<code class="sig-name descname">build</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">input_shape</span></em><span class="sig-paren">)</span><a class="headerlink" href="#TensorState.TensorState.TensorState.build" title="Permalink to this definition">¶</a></dt>
+<dd><p>Creates the variables of the layer (optional, for subclass implementers).</p>
+<p>This is a method that implementers of subclasses of <cite>Layer</cite> or <cite>Model</cite>
+can override if they need a state-creation step in-between
+layer instantiation and layer call.</p>
+<p>This is typically used to create the weights of <cite>Layer</cite> subclasses.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>input_shape</strong> – Instance of <cite>TensorShape</cite>, or list of instances of
+<cite>TensorShape</cite> if the layer expects a list of inputs
+(one instance per input).</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="TensorState.TensorState.TensorState.call">
+<code class="sig-name descname">call</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">inputs</span></em><span class="sig-paren">)</span><a class="headerlink" href="#TensorState.TensorState.TensorState.call" title="Permalink to this definition">¶</a></dt>
+<dd><p>This is where the layer’s logic lives.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>inputs</strong> – Input tensor, or list/tuple of input tensors.</p></li>
+<li><p><strong>**kwargs</strong> – Additional keyword arguments.</p></li>
+</ul>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>A tensor or list/tuple of tensors.</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py method">
+<dt id="TensorState.TensorState.TensorState.counts">
+<code class="sig-name descname">counts</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#TensorState.TensorState.TensorState.counts" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="TensorState.TensorState.TensorState.efficiency">
+<code class="sig-name descname">efficiency</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#TensorState.TensorState.TensorState.efficiency" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="TensorState.TensorState.TensorState.entropy">
+<code class="sig-name descname">entropy</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#TensorState.TensorState.TensorState.entropy" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="TensorState.TensorState.TensorState.max_entropy">
+<code class="sig-name descname">max_entropy</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#TensorState.TensorState.TensorState.max_entropy" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py attribute">
+<dt id="TensorState.TensorState.TensorState.state_count">
+<code class="sig-name descname">state_count</code><em class="property"> = 0</em><a class="headerlink" href="#TensorState.TensorState.TensorState.state_count" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py method">
+<dt id="TensorState.TensorState.TensorState.state_ids">
+<code class="sig-name descname">state_ids</code><span class="sig-paren">(</span><span class="sig-paren">)</span><a class="headerlink" href="#TensorState.TensorState.TensorState.state_ids" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</dd></dl>
+
+<dl class="py function">
+<dt id="TensorState.TensorState.aIQ">
+<code class="sig-name descname">aIQ</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">net_efficiency</span></em>, <em class="sig-param"><span class="n">accuracy</span></em>, <em class="sig-param"><span class="n">weight</span></em><span class="sig-paren">)</span><a class="headerlink" href="#TensorState.TensorState.aIQ" title="Permalink to this definition">¶</a></dt>
+<dd><p>aIQ Calculate the artificial intelligence quotient</p>
+<p>The artificial intelligence quotient (aIQ) is a simple metric to
+report a balance of neural network efficiency and task performance.
+Although not required, it is assumed that the accuracy argument
+is a float ranging from 0.0-1.0, with 1.0 meaning more accurate.</p>
+<p>aIQ = (net_efficiency * accuracy ** weight) ** (1/(weight+1))</p>
+<p>The weight argument is an integer, with higher values giving more
+weight to the accuracy of the model.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><ul class="simple">
+<li><p><strong>net_efficiency</strong> (<em>[</em><em>float</em><em>]</em>) – A float ranging from 0.0-1.0</p></li>
+<li><p><strong>accuracy</strong> (<em>[</em><em>float</em><em>]</em>) – A float ranging from 0.0-1.0</p></li>
+<li><p><strong>weight</strong> (<em>[</em><em>int</em><em>]</em>) – An integer with value &gt;=1</p></li>
+</ul>
+</dd>
+<dt class="field-even">Raises</dt>
+<dd class="field-even"><p><strong>ValueError</strong> – [description]</p>
+</dd>
+<dt class="field-odd">Returns</dt>
+<dd class="field-odd"><p>[description]</p>
+</dd>
+<dt class="field-even">Return type</dt>
+<dd class="field-even"><p>[type]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="TensorState.TensorState.build_efficiency_model">
+<code class="sig-name descname">build_efficiency_model</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">model</span></em>, <em class="sig-param"><span class="n">attach_to</span><span class="o">=</span><span class="default_value">['Conv2D', 'Dense']</span></em>, <em class="sig-param"><span class="n">method</span><span class="o">=</span><span class="default_value">'after'</span></em>, <em class="sig-param"><span class="n">storage_path</span><span class="o">=</span><span class="default_value">None</span></em><span class="sig-paren">)</span><a class="headerlink" href="#TensorState.TensorState.build_efficiency_model" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="TensorState.TensorState.layer_entropy">
+<code class="sig-name descname">layer_entropy</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">counts</span></em>, <em class="sig-param"><span class="n">alpha</span><span class="o">=</span><span class="default_value">1</span></em><span class="sig-paren">)</span><a class="headerlink" href="#TensorState.TensorState.layer_entropy" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+<dl class="py function">
+<dt id="TensorState.TensorState.network_efficiency">
+<code class="sig-name descname">network_efficiency</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">efficiencies</span></em><span class="sig-paren">)</span><a class="headerlink" href="#TensorState.TensorState.network_efficiency" title="Permalink to this definition">¶</a></dt>
+<dd><p>network_efficiency Calculate the network efficiency</p>
+<p>This method calculates the neural network efficiency, defined
+as the geometric mean of the efficiency values calculated for
+the network.</p>
+<dl class="field-list simple">
+<dt class="field-odd">Parameters</dt>
+<dd class="field-odd"><p><strong>efficiencies</strong> (<em>[</em><em>list</em><em>,</em><em>keras.Model</em><em>]</em>) – A list of efficiency
+values (floats) or a keras.Model</p>
+</dd>
+<dt class="field-even">Returns</dt>
+<dd class="field-even"><p>The network efficiency</p>
+</dd>
+<dt class="field-odd">Return type</dt>
+<dd class="field-odd"><p>[float]</p>
+</dd>
+</dl>
+</dd></dl>
+
+<dl class="py function">
+<dt id="TensorState.TensorState.reset_efficiency_model">
+<code class="sig-name descname">reset_efficiency_model</code><span class="sig-paren">(</span><em class="sig-param"><span class="n">model</span></em><span class="sig-paren">)</span><a class="headerlink" href="#TensorState.TensorState.reset_efficiency_model" title="Permalink to this definition">¶</a></dt>
+<dd></dd></dl>
+
+</div>
+</div>
+
+
+           </div>
+           
+          </div>
+          <footer>
+  
+    <div class="rst-footer-buttons" role="navigation" aria-label="footer navigation">
+      
+      
+        <a href="Installation.html" class="btn btn-neutral float-left" title="&lt;no title&gt;" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left"></span> Previous</a>
+      
+    </div>
+  
+
+  <hr/>
+
+  <div role="contentinfo">
+    <p>
+        
+        &copy; Copyright 2020, Nicholas J Schaub
+
+    </p>
+  </div>
+    
+    
+    
+    Built with <a href="http://sphinx-doc.org/">Sphinx</a> using a
+    
+    <a href="https://github.com/rtfd/sphinx_rtd_theme">theme</a>
+    
+    provided by <a href="https://readthedocs.org">Read the Docs</a>. 
+
+</footer>
+
+        </div>
+      </div>
+
+    </section>
+
+  </div>
+  
+
+  <script type="text/javascript">
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script>
+
+  
+  
+    
+   
+
+</body>
+</html>

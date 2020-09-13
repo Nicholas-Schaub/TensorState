@@ -1,0 +1,12 @@
+TensorState package
+===================
+
+TensorState.TensorState module
+------------------------------
+
+Description of core functionality.
+
+.. automodule:: TensorState.TensorState
+   :members:
+   :undoc-members:
+   :show-inheritance:
