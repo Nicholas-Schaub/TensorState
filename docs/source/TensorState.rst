@@ -1,7 +1,6 @@
 =====================
 TensorState Reference
 =====================
----------------------
 
 .. automodule:: TensorState.TensorState
    :members:
