@@ -51,7 +51,7 @@ add_module_names = False
 html_sidebars = { '**': ['globaltoc.html', 'relations.html', 'sourcelink.html', 'searchbox.html'] }
 
 # Mock imports to autobuild
-autodoc_mock_imports = ["zarr"]
+autodoc_mock_imports = ["zarr","TensorState._TensorState"]
 
 # -- Options for HTML output -------------------------------------------------
 
