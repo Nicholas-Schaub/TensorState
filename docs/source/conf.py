@@ -53,6 +53,9 @@ html_sidebars = { '**': ['globaltoc.html', 'relations.html', 'sourcelink.html', 
 # Mock imports to autobuild
 autodoc_mock_imports = ["zarr","TensorState._TensorState"]
 
+# Set the master doc
+master_doc = 'index'
+
 # -- Options for HTML output -------------------------------------------------
 
 # The theme to use for HTML and HTML Help pages.  See the documentation for
