@@ -12,4 +12,5 @@ Documentation for the Code
    :maxdepth: 1
 
    Installation
+   Tutorial
    TensorState
