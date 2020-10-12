@@ -4,11 +4,13 @@ TensorState is a toolbox to capture neural network information to better underst
 
 ## Installation
 
-If running on Windows, TensorState can be easily installed using pip for Python version 3.6 and 3.7.
+If running on Windows or Linux, TensorState can be easily installed using pip for Python version 3.5-3.8. However, to install the precompiled wheels, make sure `pip>=19.3`.
+
+`pip install pip --upgrade`
 
 `pip install TensorState`
 
-If running on Linux or on Windows with Python 3.8, make sure to install numpy and Cython 3 before using pip.
+If the wheels don't download or you run into an error, try installing the pre-requisites for compiling before installing with `pip`.
 
 `pip install numpy Cython==3.0a1`
 
@@ -16,7 +18,7 @@ If running on Linux or on Windows with Python 3.8, make sure to install numpy an
 
 ## Documentation
 
-Coming soon!
+https://tensorstate.readthedocs.io/en/latest/
 
 ## Important Information
 

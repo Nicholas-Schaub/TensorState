@@ -187,11 +187,16 @@ class StateCapture(keras.layers.Layer):
         self._chunk_size = (nrows,ncols)
         self._state_shape = list(self._chunk_size)
         self.state_count = 0
-        if self._zarr_path != None and self._zarr_path.is_file():
-            self._zarr_path.unlink()
-        self._states = zarr.zeros(shape=self._state_shape,chunks=self._chunk_size,dtype='B',
-                                  synchronizer=zarr.ThreadSynchronizer(),
-                                  store=str(self._zarr_path.absolute()))
+        if self._zarr_path != None:
+            if self._zarr_path.is_file():
+                self._zarr_path.unlink()
+                
+            self._states = zarr.zeros(shape=self._state_shape,chunks=self._chunk_size,dtype='B',
+                                      synchronizer=zarr.ThreadSynchronizer(),
+                                      store=str(self._zarr_path.absolute()))
+        else:
+            self._states = zarr.zeros(shape=self._state_shape,chunks=self._chunk_size,dtype='B',
+                                      synchronizer=zarr.ThreadSynchronizer())
         
     def _compress_and_store(self,inputs):
         num_states = inputs.shape[0] * int(np.prod(inputs.shape[1:-1]))
@@ -250,8 +255,8 @@ class StateCapture(keras.layers.Layer):
         number of times a state is observed. The identity of the states can
         be obtained by calling the ``state_ids`` method.
         
-        NOTE: The list only contains counts for observed states, so no zeros
-        will be present in the list.
+        NOTE: The list only contains counts for observed states, so all values
+        will be >0
 
         Returns:
             [list of ``int``]: Counts of stat occurences
@@ -263,10 +268,8 @@ class StateCapture(keras.layers.Layer):
             # Create the index and sort the data to find the bin edges
             start = time.time()
             self._edges,self._index = ts.lex_sort(self._states[:self.state_count,:],self.state_count)
-            print('lex_sort: {}s'.format(time.time() - start))
             start = time.time()
             self._counts = np.diff(self._edges)
-            print('counts: {}s'.format(time.time() - start))
         
         return self._counts
     
@@ -352,8 +355,6 @@ def build_efficiency_model(model,attach_to=['Conv2D','Dense'],method='after',sto
 
     # Auxiliary dictionary to describe the network graph
     network_dict = {'input_layers_of': {}, 'new_output_tensor_of': {}}
-    
-    # input_layer = keras.layers.Input(shape=input_size,name='input')
 
     # Set the input layers of each layer
     for layer in model.layers:
