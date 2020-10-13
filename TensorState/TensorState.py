@@ -1,4 +1,4 @@
-import os, queue, subprocess, time, argparse, sys, logging
+import os, queue, subprocess, argparse, sys, logging
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3' 
 import tensorflow as tf
 import tensorflow.keras as keras
@@ -66,7 +66,7 @@ def aIQ(net_efficiency,accuracy,weight):
     Returns:
         [float]: The artificial intelligence quotient
     """
-    if weight <= 0 or isinstance(weight,int):
+    if weight <= 0 or not isinstance(weight,int):
         raise ValueError('aIQ weight must be an integer greater than 0.')
     aIQ = np.power(accuracy**weight * net_efficiency,1/(weight+1))
     return aIQ
@@ -136,8 +136,17 @@ class StateCapture(keras.layers.Layer):
     _chunk_size = 0
     _state_shape = tuple()
     _entropy = None
-    state_count = 0
-    """The total number of observed states, including repeats."""
+    _state_count = 0
+    
+    @property
+    def state_count(self):
+        """The total number of observed states, including repeats."""
+        self._wait_for_threads()
+        return self._state_count
+    
+    @state_count.setter
+    def state_count(self,count):
+        self._state_count = count
     
     _states = None
     _index = None
@@ -160,6 +169,10 @@ class StateCapture(keras.layers.Layer):
             self._zarr_path.mkdir(exist_ok=True)
             self._zarr_path = self._zarr_path.joinpath(name + '.zarr')
             self._zarr_path.mkdir(exist_ok=False)
+            
+    def _wait_for_threads(self):
+        wait(self._threads)
+        self._threads = []
 
     def build(self,input_shape):
         """Build the StateCapture Keras Layer
@@ -200,11 +213,13 @@ class StateCapture(keras.layers.Layer):
         
     def _compress_and_store(self,inputs):
         num_states = inputs.shape[0] * int(np.prod(inputs.shape[1:-1]))
-        if num_states + self.state_count >= self._states.shape[0]:
+        if 2*num_states + self._state_count >= self._states.shape[0]:
             self._state_shape[0] += self._chunk_size[0]
             self._states.resize(self._state_shape)
-        self._states[self.state_count:self.state_count+num_states] = ts.compress_tensor(np.reshape(inputs,(-1,int(inputs.shape[-1]))))
-        self.state_count += num_states
+        self._states[self._state_count:self._state_count+num_states] = ts.compress_tensor(np.reshape(inputs,(-1,int(inputs.shape[-1]))))
+        self._state_count += num_states
+        
+        return True
 
     def call(self, inputs):
         if inputs.shape[0] == None:
@@ -263,12 +278,10 @@ class StateCapture(keras.layers.Layer):
         """
         if not isinstance(self._counts,np.ndarray):
             # First make sure all storage threads are finished
-            wait(self._threads)
+            self._wait_for_threads()
             
             # Create the index and sort the data to find the bin edges
-            start = time.time()
             self._edges,self._index = ts.lex_sort(self._states[:self.state_count,:],self.state_count)
-            start = time.time()
             self._counts = np.diff(self._edges)
         
         return self._counts
