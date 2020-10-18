@@ -15,9 +15,9 @@ Please send comments, suggestions, and feedback to nicholas.j.schaub@gmail.com.
 Table of Contents
 **************************
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 2
 
    Installation
-   Tutorial
+   Tutorials
    TensorState
    StateSpace

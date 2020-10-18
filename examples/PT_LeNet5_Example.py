@@ -9,6 +9,7 @@ import numpy as np
 
 import TensorState as ts
 
+# Set the device to run the model on (gpu if available, cpu otherwise)
 dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
 """ Load MNIST and transform it """
@@ -89,15 +90,15 @@ class LeNet5(nn.Module):
 
 # Create the Keras model
 model = LeNet5().to(dev)
-# ts.build_efficiency_model(model)
-
-# quit()
 
 """ Train the model """
 num_epochs = 200
 loss_func = nn.CrossEntropyLoss()
 optimizer = optim.SGD(model.parameters(),lr=0.001,momentum=0.9,
                       weight_decay=0.0005,nesterov=True)
+last_valid_accuracy = 0
+val_count = 0
+patience = 5
 
 def epoch_func(x,y,train=False):
     predictions = model(x)
@@ -112,8 +113,6 @@ def epoch_func(x,y,train=False):
     
     return loss,accuracy,num
 
-last_valid_accuracy = 0
-val_count = 0
 for epoch in range(num_epochs):
     start = time.time()
     model.train()
@@ -143,12 +142,11 @@ for epoch in range(num_epochs):
     else:
         val_count += 1
 
-    if val_count >= 5:
+    if val_count >= patience:
         break
 
 """ Evaluate model efficiency """
 # Attach StateCapture layers to the model
-
 efficiency_model = ts.build_efficiency_model(model,attach_to=['Conv2d'],method='after')
 
 # Collect the states for each layer

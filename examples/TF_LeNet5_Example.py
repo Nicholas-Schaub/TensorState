@@ -12,7 +12,6 @@ import TensorState as ts
 import numpy as np
 import time
 
-
 """ Load MNIST and transform it """
 # Load the data
 mnist = keras.datasets.mnist
