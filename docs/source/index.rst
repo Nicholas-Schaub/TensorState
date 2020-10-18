@@ -20,3 +20,4 @@ Table of Contents
    Installation
    Tutorial
    TensorState
+   StateSpace

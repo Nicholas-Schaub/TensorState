@@ -7,6 +7,7 @@ import tensorflow.keras as keras
 import TensorState as ts
 import numpy as np
 import time
+from pathlib import Path
 
 """ Load MNIST and transform it """
 # Load the data
@@ -62,29 +63,37 @@ model = keras.Model(
 print(model.summary())
 
 """ Train the model """
-# Compile for training
-model.compile(
-              optimizer=keras.optimizers.SGD(lr=0.001,momentum=0.9,nesterov=True),
-              loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True,name='loss'),
-              metrics=['accuracy']
-             )
+# If the model already exists, skip the training
+model_path = Path(str(__file__)).with_name('lenet')
+if model_path.is_file():
+    model = keras.models.load_model(str(model_path.absolute()))
+else:
 
-# Stop the model once the validation accuracy stops going down
-earlystop_callback = tf.keras.callbacks.EarlyStopping(
-                            monitor='val_accuracy',
-                            mode='max',
-                            patience=5,
-                            restore_best_weights=True
-                        )
+    # Compile for training
+    model.compile(
+                optimizer=keras.optimizers.SGD(lr=0.001,momentum=0.9,nesterov=True),
+                loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True,name='loss'),
+                metrics=['accuracy']
+                )
 
-# Train the model
-model.fit(
-          train_images, train_labels, epochs=200, 
-          validation_data=(test_images, test_labels),
-          batch_size=200,
-          callbacks=[earlystop_callback],
-          verbose=1
-         )
+    # Stop the model once the validation accuracy stops going down
+    earlystop_callback = tf.keras.callbacks.EarlyStopping(
+                                monitor='val_accuracy',
+                                mode='max',
+                                patience=5,
+                                restore_best_weights=True
+                            )
+
+    # Train the model
+    model.fit(
+            train_images, train_labels, epochs=200, 
+            validation_data=(test_images, test_labels),
+            batch_size=200,
+            callbacks=[earlystop_callback],
+            verbose=1
+            )
+
+    model.save(str(model_path))
 
 """ Evaluate model efficiency """
 # Attach StateCapture layers to the model

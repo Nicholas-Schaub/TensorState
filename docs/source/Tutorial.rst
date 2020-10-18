@@ -263,6 +263,7 @@ Complete Example
     import tensorflow as tf
     import tensorflow.keras as keras
     import TensorState as ts
+    import numpy as np
     import time
 
     """ Load MNIST and transform it """
@@ -285,9 +286,9 @@ Complete Example
     # Set the convolutional layer settings
     reg = keras.regularizers.l2(0.0005)
     kwargs = {'activation': 'elu',
-            'kernel_initializer': 'he_normal',
-            'kernel_regularizer': reg,
-            'bias_regularizer': reg}
+              'kernel_initializer': 'he_normal',
+              'kernel_regularizer': reg,
+              'bias_regularizer': reg}
 
     # Build the layers
     input_layer = keras.layers.Input(shape=(28,28,1), name='input')
@@ -314,17 +315,17 @@ Complete Example
     model = keras.Model(
                         inputs=input_layer,
                         outputs=pred
-                    )
+                       )
 
     print(model.summary())
 
     """ Train the model """
     # Compile for training
     model.compile(
-                optimizer=keras.optimizers.SGD(lr=0.001,momentum=0.9,nesterov=True),
-                loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True,name='loss'),
-                metrics=['accuracy']
-                )
+                  optimizer=keras.optimizers.SGD(lr=0.001,momentum=0.9,nesterov=True),
+                  loss=tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True,name='loss'),
+                  metrics=['accuracy']
+                 )
 
     # Stop the model once the validation accuracy stops going down
     earlystop_callback = tf.keras.callbacks.EarlyStopping(
@@ -336,12 +337,12 @@ Complete Example
 
     # Train the model
     model.fit(
-            train_images, train_labels, epochs=200, 
-            validation_data=(test_images, test_labels),
-            batch_size=200,
-            callbacks=[earlystop_callback],
-            verbose=1
-            )
+              train_images, train_labels, epochs=200, 
+              validation_data=(test_images, test_labels),
+              batch_size=200,
+              callbacks=[earlystop_callback],
+              verbose=1
+             )
 
     """ Evaluate model efficiency """
     # Attach StateCapture layers to the model
@@ -351,7 +352,7 @@ Complete Example
     print()
     print('Running model predictions to capture states...')
     start = time.time()
-    efficiency_model.predict(train_images,batch_size=200)
+    predictions = efficiency_model.predict(train_images,batch_size=200)
     print('Finished in {:.3f}s!'.format(time.time() - start))
 
     # Count the number of states in each layer
@@ -366,3 +367,19 @@ Complete Example
     for layer in efficiency_model.efficiency_layers:
         start = time.time()
         print('Layer {} efficiency: {:.1f}% ({:.3f}s)'.format(layer.name,100*layer.efficiency(),time.time() - start))
+
+    # Calculate the aIQ
+    beta = 2 # fudge factor giving a slight bias toward accuracy over efficiency
+
+    print()
+    print('Network metrics...')
+    print('Beta: {}'.format(beta))
+
+    network_efficiency = ts.network_efficiency(efficiency_model)
+    print('Network efficiency: {:.1f}%'.format(100*network_efficiency))
+
+    accuracy = np.sum(np.argmax(predictions,axis=1)==train_labels)/train_labels.size
+    print('Network accuracy: {:.1f}%'.format(100*accuracy))
+
+    aIQ  = ts.aIQ(network_efficiency,accuracy,beta)
+    print('aIQ: {:.1f}%'.format(100*aIQ))
