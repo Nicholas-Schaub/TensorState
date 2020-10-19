@@ -29,6 +29,6 @@ jobs:
       - name: Publish distribution to PyPI
         uses: pypa/gh-action-pypi-publish@master
         with:
-          user: ${{ sercrets.pypi_user }}
+          user: ${{ secrets.pypi_user }}
           password: ${{ secrets.pypi_pass }}
           packages_dir: dist/
