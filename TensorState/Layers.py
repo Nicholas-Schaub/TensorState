@@ -74,11 +74,14 @@ class AbstractStateCapture(abc.ABC):
         
         self._executor = ThreadPoolExecutor(4)
         
+        # Assign a name to the layer. Some inheriting classes make name
+        # protected, so catch the error just in case.
         try:
             self.name = name
         except AttributeError:
             pass
 
+        # Set up zarr, but don't create anything
         if disk_path != None:
             if not isinstance(disk_path,Path):
                 self._zarr_path = Path(disk_path)
@@ -94,44 +97,59 @@ class AbstractStateCapture(abc.ABC):
         self._threads = []
         
     def _compress_and_store(self,inputs):
+        # Calculate the number of states to process
         num_states = inputs.shape[0] * int(np.prod(inputs.shape[1:-1]))
+        
+        # Resize the zarr array if needed
         if 2*num_states + self._state_count >= self._states.shape[0]:
             self._state_shape[0] += self._chunk_size[0]
             self._states.resize(self._state_shape)
         
-        # print(inputs.shape)
-        # print(np.reshape(inputs,(-1,int(inputs.shape[-1]))).shape)
+        # Compress and store the states
         self._states[self._state_count:self._state_count+num_states] = ts.compress_tensor(np.reshape(inputs,(-1,int(inputs.shape[-1]))))
         self._state_count += num_states
         
+        # Reset the _counts and _state_ids so they are recalculated
+        self._counts = None
+        self._state_ids = None
+        
         return True
 
-    def init_states(self,input_shape):
-        """Build the StateCapture Keras Layer
+    def reset_states(self,input_shape=None):
+        """Initialize the state space
 
         This method initializes the layer and resets any previously held data.
         The zarr array is initialized in this method.
 
         Args:
-            input_shape (TensorShape): Either a TensorShape or list of
-                TensorShape instances.
+            input_shape (TensorShape,tuple, list): Shape of the input.
         """
+        
+        if not isinstance(input_shape, type(None)):
+            self._input_shape = input_shape
+            
+        if self._input_shape == None:
+            raise ValueError('The input_shape is None, and no previous input ' +
+                             'shape information was provided. The first time ' +
+                             'reset_states is called, an input_shape must be ' +
+                             'provided.')
 
         # Try to keep chunks limited to 16MB
         ncols = int(np.ceil(input_shape[self._channel_index]/8))
         nrows = 2**22 // ncols
-        self._input_shape = input_shape
         
+        # Initialize internal variables related to state space
         self._state_ids = None
         self._edges = None
         self._index = None
         self._counts = None
         self._entropy = None
         self._threads = []
-        
         self._chunk_size = (nrows,ncols)
         self._state_shape = list(self._chunk_size)
         self.state_count = 0
+        
+        # Initialize the zarr array
         if self._zarr_path != None:
             if self._zarr_path.is_file():
                 self._zarr_path.unlink()
@@ -155,7 +173,7 @@ class AbstractStateCapture(abc.ABC):
         For example, if the StateCapture layer is attached to a convolutional
         layer with 8 neurons, then each item in the list will be a byte array of
         length 1. If one of the bytes is ``\\x00`` (a null byte), then the state
-        is one where none of the neurons fire.
+        has no firing neurons.
         
         NOTE: Only observed states are contained in the list.
 
@@ -206,15 +224,16 @@ class AbstractStateCapture(abc.ABC):
         which is a count of the observed states.
 
         Returns:
-            [int]: Theoretical maximum entropy value
+            [float]: Theoretical maximum entropy value
         """
-        return self._input_shape[self._channel_index]
+        return float(self._input_shape[self._channel_index])
     
     def entropy(self,alpha=1):
         """Calculate the entropy of the layer
 
         Calculate the entropy from the observed states. The alpha value is the
-        order of entropy calculated using the formula for Renyi entropy.
+        order of entropy calculated using the formula for Renyi entropy. When
+        alpha=1, this returns Shannon's entropy.
         
         Args:
             alpha (int, None): Order of entropy to calculate. If ``None``, then
@@ -261,7 +280,13 @@ try:
     import tensorflow.keras as keras
     
     class StateCapture(keras.layers.Layer,AbstractStateCapture):
+        """Tensorflow keras layer to capture states in keras models
         
+        This class is designed to be used in a Tensorflow keras model to
+        automate the capturing of neurons states as data is passed through the
+        network.
+            
+        """
         def __init__(self,name,disk_path=None,**kwargs):
             # Use both parent class initializers
             keras.layers.Layer.__init__(self,name=name,**kwargs)
@@ -286,7 +311,7 @@ try:
                     TensorShape instances.
             """
             
-            self.init_states(input_shape)
+            self.reset_states(input_shape)
 
 except ModuleNotFoundError:
     
@@ -309,13 +334,12 @@ try:
 
         def __call__(self,*args):
             if self._input_shape == None:
-                self.init_states(tuple(args[-1].shape))
+                self.reset_states(tuple(args[-1].shape))
 
             # Transform the tensor to have similar memory format as Tensorflow
             inputs = args[-1].permute(0,2,3,1).contiguous()
             
             # Store the data using a thread
-            # self._compress_and_store(inputs.cpu().numpy())
             self._threads.append(self._executor.submit(self._compress_and_store,inputs.cpu().numpy()))
 
 except ModuleNotFoundError:

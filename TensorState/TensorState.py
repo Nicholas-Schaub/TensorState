@@ -16,12 +16,11 @@ logger.setLevel(logging.WARNING)
 def network_efficiency(efficiencies):
     """Calculate the network efficiency
 
-    This method calculates the neural network efficiency, defined
-    as the geometric mean of the efficiency values calculated for
-    the network.
+    This method calculates the neural network efficiency, defined as the
+    geometric mean of the efficiency values calculated for the network.
 
     Args:
-        efficiencies ([list,keras.Model]): A list of efficiency
+        efficiencies ([list,keras.Model,torch.nn.Module]): A list of efficiency
             values (floats) or a keras.Model
 
     Returns:
@@ -44,15 +43,15 @@ def network_efficiency(efficiencies):
 def aIQ(net_efficiency,accuracy,weight):
     """Calculate the artificial intelligence quotient
 
-    The artificial intelligence quotient (aIQ) is a simple metric to
-    report a balance of neural network efficiency and task performance.
-    Although not required, it is assumed that the accuracy argument
-    is a float ranging from 0.0-1.0, with 1.0 meaning more accurate.
+    The artificial intelligence quotient (aIQ) is a simple metric to report a
+    balance of neural network efficiency and task performance. Although not
+    required, it is assumed that the accuracy argument is a float ranging from
+    0.0-1.0, with 1.0 meaning more accurate.
     
     aIQ = (net_efficiency * accuracy ** weight) ** (1/(weight+1))
     
-    The weight argument is an integer, with higher values giving more
-    weight to the accuracy of the model.
+    The weight argument is an integer, with higher values giving more weight to
+    the accuracy of the model.
 
     Args:
         net_efficiency ([float]): A float ranging from 0.0-1.0
@@ -74,15 +73,16 @@ def entropy(counts,alpha=1):
     """Calculate the Renyi entropy
 
     The Renyi entropy is a general definition of entropy that encompasses
-    Shannon's entropy, Hartley (maximum) entropy, and min-entropy. It is
-    defined as:
+    Shannon's entropy, Hartley (maximum) entropy, and min-entropy. It is defined
+    as:
     
     ``(1-alpha)**-1 * log2( sum(p**alpha) )``
     
     By default, this method sets alpha=1, which is Shannon's entropy.
 
     Args:
-        counts (list of ints): Count of each time a state is observed.
+        counts (numpy.ndarray): Array of counts representing number of times a
+            state is observed.
         alpha ([int,float], optional): Entropy order. Defaults to 1.
 
     Returns:
@@ -93,19 +93,23 @@ def entropy(counts,alpha=1):
     if alpha==1:
         entropy = (-frequencies * np.log2(frequencies)).sum()
     else:
-        defaults = np.seterr(all='warn')
-        try:
-            entropy = 1/(1-alpha) * np.log2((frequencies**alpha).sum())
-        except Warning:
-            logger.warning('A warning was generated, like due to alpha being too large. Returning min entropy (alpha=inf)')
-            entropy = -np.log2(np.max(frequencies))
-        np.seterr(**defaults)
+        entropy = 1/(1-alpha) * np.log2((frequencies**alpha).sum())
         
     return entropy
         
 def reset_efficiency_model(model):
+    """Reset all efficiency layers/hooks in a model
+    
+    This method resets all efficiency layers or hooks in a model, setting the
+    ``state_count=0``. This is useful for repeated evaluation of a model
+    during a single session.
+
+    Args:
+        model ([keras.Model, torch.nn.Module]): Model to reset
+    """
+    
     for layer in model.efficiency_layers:
-        layer.build(layer._input_shape)
+        layer.reset_states()
 
 def _pt_efficiency_model(model,attach_to,exclude,method,storage_path):
 
@@ -178,8 +182,10 @@ def _tf_efficiency_model(model,attach_to,exclude,method,storage_path):
             
             network_dict['new_output_tensor_of'].update({network_dict['input_layers_of'][layer.name][0]: layer_input})
 
+        # Process layer
         x = layer(layer_input)
         
+        # Add layer after if requested
         if method in ['after','both']\
             and (layer.__class__.__name__ in attach_to or layer.name in attach_to) \
             and (layer.__class__.__name__ not in exclude or layer.name in exclude):
