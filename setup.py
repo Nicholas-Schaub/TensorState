@@ -9,6 +9,9 @@ os.environ['CXXFLAGS'] = '-march=native -O3'
 
 with open("VERSION",'r') as fh:
     version = fh.read()
+    
+with open("README.md", "r") as fh:
+    long_description = fh.read()
 
 setuptools.setup(
     name="TensorState",
@@ -16,7 +19,7 @@ setuptools.setup(
     author="Nick Schaub",
     author_email="nick.schaub@nih.gov",
     description="Tools for analyzing neural network architecture.",
-    url="https://github.com/nicholas-schaub/TensorState/",
+    url="https://tensorstate.readthedocs.io/en/latest/",
     packages=setuptools.find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",

@@ -268,9 +268,9 @@ should look something like this:
 
 .. code-block:: bash
     
-    Layer conv_1_states number of states: 5760000
-    Layer conv_2_states number of states: 640000
-    Layer conv_3_states number of states: 10000
+    Layer conv_1_post_states number of states: 5760000
+    Layer conv_2_post_states number of states: 640000
+    Layer conv_3_post_states number of states: 10000
 
 Since there are 10,000 images in the training data set, it is expected that the
 fully connected layer (``conv_3_post_states``) has 10,000 states recorded, since
