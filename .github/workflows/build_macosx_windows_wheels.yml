@@ -35,20 +35,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install wheel numpy==1.19.2 cython==3.0a1
-      - name: Set environment variables on Mac OS
-        if: matrix.os == 'macos-latest'
-        shell: bash -l {0}
-        run: |
-          echo ::set-env name=CFLAGS::-I$CONDA_PREFIX/include
-          echo ::set-env name=LDFLAGS::-I$CONDA_PREFIX/lib
-          echo ::set-env name=LD_LIBRARY_PATH::-I$CONDA_PREFIX/lib
-      - name: Set environment variables on Windows
-        if: matrix.os == 'windows-latest'
-        shell: bash -l {0}
-        run: |
-          echo ::set-env name=INCLUDE::$CONDA_PREFIX\\Library\\include
-          echo ::set-env name=LIB::$CONDA_PREFIX\\Library\\lib
-          echo ::set-env name=LIBPATH::$CONDA_PREFIX\\Library\\lib
       - name: Build wheel
         shell: bash -l {0}
         run: python setup.py sdist bdist_wheel
@@ -80,5 +66,6 @@ jobs:
       - name: Publish distribution to PyPI
         uses: pypa/gh-action-pypi-publish@master
         with:
-          password: ${{ secrets.pypi_token }}
+          user: ${{ secrets.pypi_user }}
+          password: ${{ secrets.pypi_pass }}
           packages_dir: wheelhouse/
