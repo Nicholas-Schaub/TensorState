@@ -11,7 +11,7 @@ for PYTHON_VERSION in ${PYTHON_VERSIONS[@]}; do
     /opt/python/${PYTHON_VERSION}/bin/python setup.py bdist_wheel -d wheelhouse
 done
 
-for whl in /github/workspace/wheelhouse/*.whl; do
-    auditwheel repair $whl
+for whl in ./dist/*.whl; do
+    auditwheel repair $whl -w ./dist
     rm $whl
 done
