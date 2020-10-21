@@ -1,7 +1,7 @@
-import zarr, abc, sys, logging
+import zarr, abc, logging
 
 from concurrent.futures import ThreadPoolExecutor, wait
-import TensorState._TensorState as ts
+import TensorState.States as ts
 import TensorState
 from pathlib import Path
 import numpy as np
@@ -106,7 +106,7 @@ class AbstractStateCapture(abc.ABC):
             self._states.resize(self._state_shape)
         
         # Compress and store the states
-        self._states[self._state_count:self._state_count+num_states] = ts.compress_tensor(np.reshape(inputs,(-1,int(inputs.shape[-1]))))
+        self._states[self._state_count:self._state_count+num_states] = ts.compress_states(np.reshape(inputs,(-1,int(inputs.shape[-1]))))
         self._state_count += num_states
         
         # Reset the _counts and _state_ids so they are recalculated
@@ -210,7 +210,7 @@ class AbstractStateCapture(abc.ABC):
             self._wait_for_threads()
             
             # Create the index and sort the data to find the bin edges
-            self._edges,self._index = ts.lex_sort(self._states[:self.state_count,:],self.state_count)
+            self._edges,self._index = ts.sort_states(self._states[:self.state_count,:],self.state_count)
             self._counts = np.diff(self._edges)
         
         return self._counts
