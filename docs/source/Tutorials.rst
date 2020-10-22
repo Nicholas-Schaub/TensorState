@@ -7,5 +7,5 @@ List of Tutorials
 .. toctree::
    :maxdepth: 1
 
-   TF_Tutorial
-   PT_Tutorial
+   Tutorials_TF
+   Tutorials_PT

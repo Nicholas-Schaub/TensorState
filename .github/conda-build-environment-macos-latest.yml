@@ -4,3 +4,5 @@ channels:
 dependencies:
   - numpy
   - setuptools
+  - conda-forge::compilers
+  - conda-forge::gsl
