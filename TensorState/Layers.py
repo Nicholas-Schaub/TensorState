@@ -184,8 +184,8 @@ class AbstractStateCapture(abc.ABC):
         if self._state_ids == None:
             self.counts()
             self._state_ids = []
-            states = self._states[:self._edges[-1]]
-            states = states[self._edges[:-1],:].tobytes()
+            # states = self._states[:self._edges[-1]]
+            states = states.oindex[self._edges[:-1],:].tobytes()
             delta = self._states.shape[1]
             for cindex in range(0,delta * (self._edges.shape[0]-1),delta):
                 self._state_ids.append(states[cindex:cindex+delta])
