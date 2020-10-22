@@ -5,19 +5,23 @@ import numpy as np
 
 IF UNAME_SYSNAME == "Windows":
     cdef extern from "immintrin.h":
+        ctypedef int __m128i
         ctypedef int __m256i
         ctypedef float __m256
 
-        __m256 _mm256_loadu_ps(np.float32_t* __A) nogil
-        __m256 _mm256_setzero_ps()
+        __m128i _mm_loadu_si128(__m128i* __A) nogil
+        __m256 _mm256_loadu_ps(__m256* __A) nogil
+        __m256 _mm256_setzero_ps() nogil
         int _mm256_movemask_ps(__m256 __A) nogil
 ELSE:
     cdef extern from "x86intrin.h":
+        ctypedef int __m128i
         ctypedef int __m256i
         ctypedef float __m256
 
-        __m256 _mm256_loadu_ps(np.float32_t* __A) nogil
-        __m256 _mm256_setzero_ps()
+        __m128i _mm_loadu_si128(__m128i* __A) nogil
+        __m256 _mm256_loadu_ps(__m256* __A) nogil
+        __m256 _mm256_setzero_ps() nogil
         int _mm256_movemask_ps(__m256 __A) nogil
 
 @cython.boundscheck(False)
@@ -108,8 +112,11 @@ cdef void __lex_sort(unsigned char [:,:] states,
             if c > 0:
                 bin_edges.append(bin_edges[len(bin_edges)-1] + c)
 
-cpdef _lex_sort(unsigned char [:,:] states,
-                long long state_count):
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.initializedcheck(False)
+cpdef lex_sort(unsigned char [:,:] states,
+               unsigned long long state_count):
 
     index = np.arange(states.shape[0],dtype=np.uint64)
 
@@ -162,5 +169,35 @@ cpdef np.ndarray _compress_tensor(const float [:,:] input):
 
     # Call the nogil method
     __compress_tensor(input,result)
+
+    return result
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.initializedcheck(False)
+cpdef np.ndarray __decompress_tensor(unsigned char [:,:] input,
+                                     long long n_neurons,
+                                     unsigned char [:,:] result):
+
+    # Initialize the output
+    rows = input.shape[0]
+    result = np.zeros((rows,n_neurons), dtype = np.bool_)
+
+    # Call the nogil method
+    _compress_tensor(input,n_neurons,result)
+
+    return result
+
+@cython.boundscheck(False)
+@cython.wraparound(False)
+@cython.initializedcheck(False)
+cpdef np.ndarray _decompress_tensor(unsigned char [:,:] input, long long n_neurons):
+
+    # Initialize the output
+    rows = input.shape[0]
+    result = np.zeros((rows,n_neurons), dtype = np.uint8)
+
+    # Call the nogil method
+    # _compress_tensor(input,n_neurons,result)
 
     return result

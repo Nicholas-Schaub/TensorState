@@ -22,8 +22,8 @@ copyright = '2020, Nicholas J Schaub'
 author = 'Nicholas J Schaub'
 
 # The full version, including alpha/beta/rc tags
-release = '0.0.1-a1'
-
+with open("VERSION",'r') as fh:
+    release = fh.read()
 
 # -- General configuration ---------------------------------------------------
 
@@ -51,7 +51,10 @@ add_module_names = False
 html_sidebars = { '**': ['globaltoc.html', 'relations.html', 'sourcelink.html', 'searchbox.html'] }
 
 # Mock imports to autobuild
-autodoc_mock_imports = ["zarr","TensorState._TensorState"]
+autodoc_mock_imports = ["zarr",
+                        "TensorState._TensorState",
+                        "tensorflow.keras",
+                        "torch"]
 
 # Set the master doc
 master_doc = 'index'

@@ -184,11 +184,11 @@ class AbstractStateCapture(abc.ABC):
         if self._state_ids == None:
             self.counts()
             self._state_ids = []
-            states = self._states[:self.state_count,:].tobytes()
-            for cindex in range(self._edges.shape[0]-1):
-                start_index = int(self._index[self._edges[cindex]]*self._states.shape[1])
-                end_index = start_index + self._states.shape[1]
-                self._state_ids.append(states[start_index:end_index])
+            states = self._states[:self._edges[-1]]
+            states = states[self._edges[:-1],:].tobytes()
+            delta = self._states.shape[1]
+            for cindex in range(0,delta * (self._edges.shape[0]-1),delta):
+                self._state_ids.append(states[cindex:cindex+delta])
             
         return self._state_ids
     
