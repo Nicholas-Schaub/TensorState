@@ -316,15 +316,49 @@ try:
 except ModuleNotFoundError:
     
     class StateCapture(AbstractStateCapture):
+        """Tensorflow keras layer to capture states in keras models
+
+        This class is designed to be used in a Tensorflow keras model to
+        automate the capturing of neurons states as data is passed through the
+        network.
+            
+        """
             
         def __init__(self,name,disk_path=None,**kwargs):
             raise ModuleNotFoundError('StateCapture class is unavailable since'+
                                       ' tensorflow was not found.')
+            
+        def call(self, inputs):
+            if inputs.shape[0] == None:
+                return inputs
+
+            self._threads.append(self._executor.submit(self._compress_and_store,inputs))
+            
+            return inputs
+            
+        def build(self,input_shape):
+            """Build the StateCapture Keras Layer
+
+            This method initializes the layer and resets any previously held
+            data. The zarr array is initialized in this method.
+
+            Args:
+                input_shape (TensorShape): Either a TensorShape or list of
+                    TensorShape instances.
+            """
+            
+            self.reset_states(input_shape)
 
 try:
     import torch
     
     class StateCaptureHook(AbstractStateCapture):
+        """StateCapture hook for PyTorch
+
+        This class implements all methods in AbstractStateCapture, but is
+        designed to be a pre or post hook for a layer.
+        
+        """
 
         def __init__(self,name,disk_path=None,**kwargs):
             # Use both parent class initializers
@@ -345,6 +379,12 @@ try:
 except ModuleNotFoundError:
     
     class StateCaptureHook(AbstractStateCapture):
+        """StateCapture hook for PyTorch
+
+        This class implements all methods in AbstractStateCapture, but is
+        designed to be a pre or post hook for a layer.
+        
+        """
             
         def __init__(self,name,disk_path=None,**kwargs):
             raise ModuleNotFoundError('StateCaptureHook class is unavailable' +
