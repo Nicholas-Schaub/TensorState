@@ -154,7 +154,7 @@ cdef void __lex_sort(unsigned char [:,:] states,
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.initializedcheck(False)
-cpdef lex_sort(unsigned char [:,:] states,
+cpdef _lex_sort(unsigned char [:,:] states,
                unsigned long long state_count):
 
     index = np.arange(states.shape[0],dtype=np.uint64)
