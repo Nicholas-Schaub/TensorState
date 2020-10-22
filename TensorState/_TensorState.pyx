@@ -23,12 +23,12 @@ ELSE:
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.initializedcheck(False)
-cdef void  byte_sort(unsigned char [:,:] states,
-                     unsigned long long [:] index,
-                     unsigned long long start,
-                     unsigned long long end,
-                     unsigned long long col,
-                     long long [:] counts) nogil:
+cdef void __byte_sort(unsigned char [:,:] states,
+                      unsigned long long [:] index,
+                      unsigned long long start,
+                      unsigned long long end,
+                      unsigned long long col,
+                      long long [:] counts) nogil:
 
     # Create an index view for fast rearranging of indices
     cdef unsigned long long [:] index_view = index
@@ -81,48 +81,48 @@ cdef void  byte_sort(unsigned char [:,:] states,
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.nonecheck(False)
-cdef void _lex_sort(unsigned char [:,:] states,
-                    unsigned long long [:] index,
-                    unsigned long long start,
-                    unsigned long long end,
-                    unsigned long long col,
-                    list bin_edges):
+cdef void __lex_sort(unsigned char [:,:] states,
+                     unsigned long long [:] index,
+                     unsigned long long start,
+                     unsigned long long end,
+                     unsigned long long col,
+                     list bin_edges):
 
     cdef unsigned long long total = 0
     cdef unsigned long long i
     cdef long long counts[256]
 
     if col > 0:
-        byte_sort(states, index, start, end, col, counts)
+        __byte_sort(states, index, start, end, col, counts)
         for i in range(256):
             if counts[i]<=1:
                 if counts[i] == 1:
                     bin_edges.append(bin_edges[len(bin_edges)-1] + counts[i])
                 total += counts[i]
                 continue
-            _lex_sort(states, index, start+total, start+total+counts[i], col-1, bin_edges)
+            __lex_sort(states, index, start+total, start+total+counts[i], col-1, bin_edges)
             total += counts[i]
     else:
-        byte_sort(states, index, start, end, col, counts)
+        __byte_sort(states, index, start, end, col, counts)
         for c in counts:
             if c > 0:
                 bin_edges.append(bin_edges[len(bin_edges)-1] + c)
 
-cpdef lex_sort(unsigned char [:,:] states,
-               unsigned long long state_count):
+cpdef _lex_sort(unsigned char [:,:] states,
+                long long state_count):
 
     index = np.arange(states.shape[0],dtype=np.uint64)
 
     bin_edges = [0]
 
-    _lex_sort(states,index,0,state_count,states.shape[1]-1,bin_edges)
+    __lex_sort(states,index,0,state_count,states.shape[1]-1,bin_edges)
 
     return np.asarray(bin_edges,dtype=np.uint64),index
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.initializedcheck(False)
-cdef void _compress_tensor(const float[:,:] input, unsigned char [:,:] result) nogil:
+cdef void __compress_tensor(const float[:,:] input, unsigned char [:,:] result) nogil:
 
     # Initialize variables
     cdef __m256 substate
@@ -155,12 +155,12 @@ cdef void _compress_tensor(const float[:,:] input, unsigned char [:,:] result) n
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.initializedcheck(False)
-cpdef np.ndarray compress_tensor(const float [:,:] input):
+cpdef np.ndarray _compress_tensor(const float [:,:] input):
     # Initialize the output
     rows,cols = input.shape[0], input.shape[1]
     result = np.zeros((rows,int(np.ceil(cols/8))), dtype = np.uint8)
 
     # Call the nogil method
-    _compress_tensor(input,result)
+    __compress_tensor(input,result)
 
     return result

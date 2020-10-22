@@ -1,7 +1,7 @@
-import zarr, abc, sys, logging
+import zarr, abc, logging
 
 from concurrent.futures import ThreadPoolExecutor, wait
-import TensorState._TensorState as ts
+import TensorState.States as ts
 import TensorState
 from pathlib import Path
 import numpy as np
@@ -106,7 +106,7 @@ class AbstractStateCapture(abc.ABC):
             self._states.resize(self._state_shape)
         
         # Compress and store the states
-        self._states[self._state_count:self._state_count+num_states] = ts.compress_tensor(np.reshape(inputs,(-1,int(inputs.shape[-1]))))
+        self._states[self._state_count:self._state_count+num_states] = ts.compress_states(np.reshape(inputs,(-1,int(inputs.shape[-1]))))
         self._state_count += num_states
         
         # Reset the _counts and _state_ids so they are recalculated
@@ -210,7 +210,7 @@ class AbstractStateCapture(abc.ABC):
             self._wait_for_threads()
             
             # Create the index and sort the data to find the bin edges
-            self._edges,self._index = ts.lex_sort(self._states[:self.state_count,:],self.state_count)
+            self._edges,self._index = ts.sort_states(self._states[:self.state_count,:],self.state_count)
             self._counts = np.diff(self._edges)
         
         return self._counts
@@ -316,15 +316,49 @@ try:
 except ModuleNotFoundError:
     
     class StateCapture(AbstractStateCapture):
+        """Tensorflow keras layer to capture states in keras models
+
+        This class is designed to be used in a Tensorflow keras model to
+        automate the capturing of neurons states as data is passed through the
+        network.
+            
+        """
             
         def __init__(self,name,disk_path=None,**kwargs):
             raise ModuleNotFoundError('StateCapture class is unavailable since'+
                                       ' tensorflow was not found.')
+            
+        def call(self, inputs):
+            if inputs.shape[0] == None:
+                return inputs
+
+            self._threads.append(self._executor.submit(self._compress_and_store,inputs))
+            
+            return inputs
+            
+        def build(self,input_shape):
+            """Build the StateCapture Keras Layer
+
+            This method initializes the layer and resets any previously held
+            data. The zarr array is initialized in this method.
+
+            Args:
+                input_shape (TensorShape): Either a TensorShape or list of
+                    TensorShape instances.
+            """
+            
+            self.reset_states(input_shape)
 
 try:
     import torch
     
     class StateCaptureHook(AbstractStateCapture):
+        """StateCapture hook for PyTorch
+
+        This class implements all methods in AbstractStateCapture, but is
+        designed to be a pre or post hook for a layer.
+        
+        """
 
         def __init__(self,name,disk_path=None,**kwargs):
             # Use both parent class initializers
@@ -345,6 +379,12 @@ try:
 except ModuleNotFoundError:
     
     class StateCaptureHook(AbstractStateCapture):
+        """StateCapture hook for PyTorch
+
+        This class implements all methods in AbstractStateCapture, but is
+        designed to be a pre or post hook for a layer.
+        
+        """
             
         def __init__(self,name,disk_path=None,**kwargs):
             raise ModuleNotFoundError('StateCaptureHook class is unavailable' +
