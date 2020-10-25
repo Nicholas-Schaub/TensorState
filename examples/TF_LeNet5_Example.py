@@ -113,20 +113,6 @@ print('Evaluating efficiency of each layer...')
 for layer in efficiency_model.efficiency_layers:
     start = time.time()
     print('Layer {} efficiency: {:.1f}% ({:.3f}s)'.format(layer.name,100*layer.efficiency(),time.time() - start))
-    
-# Count the number of states in each layer
-print()
-print('Getting the number of unique states in each layer...')
-for layer in efficiency_model.efficiency_layers:
-    print('Layer {} number of unique states: {}'.format(layer.name,len(layer.counts())))
-    
-# Calculate each layers efficiency
-print()
-print('Getting state ids for each layer...')
-for layer in efficiency_model.efficiency_layers:
-    start = time.time()
-    layer.state_ids()
-    print('Layer {} ids: {} ({:.3f}s)'.format(layer.name,len(layer.state_ids()),time.time() - start))
 
 # Calculate the aIQ
 beta = 2 # fudge factor giving a slight bias toward accuracy over efficiency
