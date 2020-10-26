@@ -97,7 +97,7 @@ class AbstractStateCapture(abc.ABC):
                 classes that inerit from AbstractStateCapture.
         """
         
-        self._executor = ThreadPoolExecutor(4)
+        self._executor = ThreadPoolExecutor(2)
         
         # Assign a name to the layer. Some inheriting classes make name
         # protected, so catch the error just in case.
@@ -175,17 +175,22 @@ class AbstractStateCapture(abc.ABC):
         self._state_shape = list(self._chunk_size)
         self._state_count = 0
         
-        # Initialize the zarr array
-        if self._zarr_path != None:
-            if self._zarr_path.is_file():
-                self._zarr_path.unlink()
-                
-            self._raw_states = zarr.zeros(shape=self._state_shape,chunks=self._chunk_size,dtype='B',
-                                          synchronizer=zarr.ThreadSynchronizer(),
-                                          store=str(self._zarr_path.absolute()))
+        if self._raw_states != None:
+            # Zero out states and resize if zarr already open
+            self._raw_states.resize(self._state_shape)
+            self._raw_states[:] = 0
         else:
-            self._raw_states = zarr.zeros(shape=self._state_shape,chunks=self._chunk_size,dtype='B',
-                                          synchronizer=zarr.ThreadSynchronizer())
+            # Initialize the zarr array
+            if self._zarr_path != None:
+                if self._zarr_path.is_file():
+                    self._zarr_path.unlink()
+                    
+                self._raw_states = zarr.zeros(shape=self._state_shape,chunks=self._chunk_size,dtype='B',
+                                              synchronizer=zarr.ThreadSynchronizer(),
+                                              store=str(self._zarr_path.absolute()))
+            else:
+                self._raw_states = zarr.zeros(shape=self._state_shape,chunks=self._chunk_size,dtype='B',
+                                              synchronizer=zarr.ThreadSynchronizer())
             
     def state_ids(self):
         """Identity of observed states
@@ -392,6 +397,9 @@ try:
             self._channel_index = 1
 
         def __call__(self,*args):
+            # if args[0].training:
+            #     return
+            
             if self._input_shape == None:
                 self.reset_states(tuple(args[-1].shape))
 
@@ -399,7 +407,7 @@ try:
             inputs = args[-1].permute(0,2,3,1).contiguous()
             
             # Store the data using a thread
-            self._threads.append(self._executor.submit(self._compress_and_store,inputs.cpu().numpy()))
+            self._threads.append(self._executor.submit(self._compress_and_store,inputs.detach().cpu().numpy()))
 
 except ModuleNotFoundError:
     
