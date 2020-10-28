@@ -5,7 +5,7 @@ demonstrate the current useful functionality of the package.
 List of Tutorials
 *****************
 .. toctree::
-   :maxdepth: 1
+   :maxdepth: 2
 
-   Tutorials_TF
-   Tutorials_PT
+   Tutorials/TF_LeNet5
+   Tutorials/PT_LeNet5

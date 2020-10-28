@@ -3,6 +3,5 @@
     "restructuredtext.confPath": "${workspaceFolder}\\docs\\source",
     "restructuredtext.updateOnTextChanged"    : "true",
     "restructuredtext.updateDelay": 300,
-    "python.pythonPath": "/home/schaubnj/anaconda3/bin/python",
     "editor.rulers": [80]
 }

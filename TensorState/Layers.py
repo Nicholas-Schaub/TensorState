@@ -46,10 +46,35 @@ class AbstractStateCapture(abc.ABC):
         return self._state_count
     
     @state_count.setter
-    def state_count(self,count):
-        self._state_count = count
+    def state_count(self,value):
+        raise AttributeError('state_count attribute is read-only.')
+    
+    @property
+    def states(self):
+        """Decompressed state data"""
+        self._wait_for_threads()
+        if not isinstance(self._states,np.ndarray):
+            self._states = ts.decompress_states(self.raw_states[self._index[self._edges[:-1]],:],
+                                                int(self.max_entropy()))
+        
+        return self._states
+    
+    @states.setter
+    def states(self,value):
+        raise AttributeError('states attribute is read-only.')
+    
+    @property
+    def raw_states(self):
+        """Raw state data as stored in memory, bit compressed"""
+        self._wait_for_threads()
+        return self._raw_states.oindex
+    
+    @raw_states.setter
+    def raw_states(self,value):
+        raise AttributeError('states attribute is read-only.')
     
     _states = None
+    _raw_states = None
     _index = None
     _edges = None
     _counts = None
@@ -72,7 +97,7 @@ class AbstractStateCapture(abc.ABC):
                 classes that inerit from AbstractStateCapture.
         """
         
-        self._executor = ThreadPoolExecutor(4)
+        self._executor = ThreadPoolExecutor(2)
         
         # Assign a name to the layer. Some inheriting classes make name
         # protected, so catch the error just in case.
@@ -101,17 +126,18 @@ class AbstractStateCapture(abc.ABC):
         num_states = inputs.shape[0] * int(np.prod(inputs.shape[1:-1]))
         
         # Resize the zarr array if needed
-        if 2*num_states + self._state_count >= self._states.shape[0]:
+        if 2*num_states + self._state_count >= self._raw_states.shape[0]:
             self._state_shape[0] += self._chunk_size[0]
-            self._states.resize(self._state_shape)
+            self._raw_states.resize(self._state_shape)
         
         # Compress and store the states
-        self._states[self._state_count:self._state_count+num_states] = ts.compress_states(np.reshape(inputs,(-1,int(inputs.shape[-1]))))
+        self._raw_states[self._state_count:self._state_count+num_states] = ts.compress_states(np.reshape(inputs,(-1,int(inputs.shape[-1]))))
         self._state_count += num_states
         
         # Reset the _counts and _state_ids so they are recalculated
         self._counts = None
         self._state_ids = None
+        self._states = None
         
         return True
 
@@ -135,7 +161,7 @@ class AbstractStateCapture(abc.ABC):
                              'provided.')
 
         # Try to keep chunks limited to 16MB
-        ncols = int(np.ceil(input_shape[self._channel_index]/8))
+        ncols = int(np.ceil(self._input_shape[self._channel_index]/8))
         nrows = 2**22 // ncols
         
         # Initialize internal variables related to state space
@@ -147,19 +173,24 @@ class AbstractStateCapture(abc.ABC):
         self._threads = []
         self._chunk_size = (nrows,ncols)
         self._state_shape = list(self._chunk_size)
-        self.state_count = 0
+        self._state_count = 0
         
-        # Initialize the zarr array
-        if self._zarr_path != None:
-            if self._zarr_path.is_file():
-                self._zarr_path.unlink()
-                
-            self._states = zarr.zeros(shape=self._state_shape,chunks=self._chunk_size,dtype='B',
-                                      synchronizer=zarr.ThreadSynchronizer(),
-                                      store=str(self._zarr_path.absolute()))
+        if self._raw_states != None:
+            # Zero out states and resize if zarr already open
+            self._raw_states.resize(self._state_shape)
+            self._raw_states[:] = 0
         else:
-            self._states = zarr.zeros(shape=self._state_shape,chunks=self._chunk_size,dtype='B',
-                                      synchronizer=zarr.ThreadSynchronizer())
+            # Initialize the zarr array
+            if self._zarr_path != None:
+                if self._zarr_path.is_file():
+                    self._zarr_path.unlink()
+                    
+                self._raw_states = zarr.zeros(shape=self._state_shape,chunks=self._chunk_size,dtype='B',
+                                              synchronizer=zarr.ThreadSynchronizer(),
+                                              store=str(self._zarr_path.absolute()))
+            else:
+                self._raw_states = zarr.zeros(shape=self._state_shape,chunks=self._chunk_size,dtype='B',
+                                              synchronizer=zarr.ThreadSynchronizer())
             
     def state_ids(self):
         """Identity of observed states
@@ -181,14 +212,13 @@ class AbstractStateCapture(abc.ABC):
             [list of Bytes]: Unique states observed by the layer
         """
         
-        if self._state_ids == None:
+        if not isinstance(self._state_ids,list):
             self.counts()
             self._state_ids = []
-            states = self._states[:self.state_count,:].tobytes()
-            for cindex in range(self._edges.shape[0]-1):
-                start_index = int(self._index[self._edges[cindex]]*self._states.shape[1])
-                end_index = start_index + self._states.shape[1]
-                self._state_ids.append(states[start_index:end_index])
+            states = self.raw_states[self._index[self._edges[:-1]],:].tobytes()
+            delta = int(self.max_entropy())
+            for cindex in range(0,delta * (self._edges.shape[0]-1),delta):
+                self._state_ids.append(states[cindex:cindex+delta])
             
         return self._state_ids
     
@@ -205,12 +235,12 @@ class AbstractStateCapture(abc.ABC):
         Returns:
             [list of ``int``]: Counts of stat occurences
         """
+        
         if not isinstance(self._counts,np.ndarray):
-            # First make sure all storage threads are finished
-            self._wait_for_threads()
-            
+                        
             # Create the index and sort the data to find the bin edges
-            self._edges,self._index = ts.sort_states(self._states[:self.state_count,:],self.state_count)
+            self._edges,self._index = ts.sort_states(self.raw_states[:self.state_count,:],
+                                                     self.state_count)
             self._counts = np.diff(self._edges)
         
         return self._counts
@@ -242,12 +272,11 @@ class AbstractStateCapture(abc.ABC):
         Returns:
             [float]: The entropy of the layer
         """
+        
         if alpha==None:
             return self.max_entropy()
         else:
-            self._entropy = TensorState.entropy(self.counts(),alpha)
-
-        return self._entropy
+            return TensorState.entropy(self.counts(),alpha)
 
     def efficiency(self,alpha1=1,alpha2=None):
         """Calculate the efficiency of the layer
@@ -268,6 +297,7 @@ class AbstractStateCapture(abc.ABC):
         Returns:
             [float]: The efficiency of the layer
         """
+        
         assert isinstance(alpha1,(float,int)), 'alpha1 must be a float or int'
         assert isinstance(alpha2,(float,int,None.__class__)), 'alpha2 must be a\
                                                            float, int, or None'
@@ -367,6 +397,9 @@ try:
             self._channel_index = 1
 
         def __call__(self,*args):
+            # if args[0].training:
+            #     return
+            
             if self._input_shape == None:
                 self.reset_states(tuple(args[-1].shape))
 
@@ -374,7 +407,7 @@ try:
             inputs = args[-1].permute(0,2,3,1).contiguous()
             
             # Store the data using a thread
-            self._threads.append(self._executor.submit(self._compress_and_store,inputs.cpu().numpy()))
+            self._threads.append(self._executor.submit(self._compress_and_store,inputs.detach().cpu().numpy()))
 
 except ModuleNotFoundError:
     

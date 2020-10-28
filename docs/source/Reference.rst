@@ -2,12 +2,9 @@
 Reference
 =========
 
-.. automodule:: TensorState.TensorState
-   :members:
-   :undoc-members:
-   :show-inheritance:
+.. toctree::
+   :maxdepth: 2
 
-.. automodule:: TensorState.Layers
-   :members:
-   :undoc-members:
-   :show-inheritance:
+   Reference/TensorState
+   Reference/Layers
+   Reference/States

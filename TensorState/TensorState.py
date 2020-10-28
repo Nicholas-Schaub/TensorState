@@ -172,7 +172,7 @@ def _tf_efficiency_model(model,attach_to,exclude,method,storage_path):
             and (layer.__class__.__name__ in attach_to or layer.name in attach_to) \
             and (layer.__class__.__name__ not in exclude or layer.name in exclude):
                 
-            efficiency_layer = StateCapture(name=network_dict['input_layers_of'][layer.name][0]+'_states',disk_path=storage_path)
+            efficiency_layer = StateCapture(name=network_dict['input_layers_of'][layer.name][0]+'_pre_states',disk_path=storage_path)
             efficiency_layers.append(efficiency_layer)
             layer_input = efficiency_layer(layer_input)
             
@@ -186,7 +186,7 @@ def _tf_efficiency_model(model,attach_to,exclude,method,storage_path):
             and (layer.__class__.__name__ in attach_to or layer.name in attach_to) \
             and (layer.__class__.__name__ not in exclude or layer.name in exclude):
                 
-            efficiency_layer = StateCapture(name=layer.name+'_states',disk_path=storage_path)
+            efficiency_layer = StateCapture(name=layer.name+'_post_states',disk_path=storage_path)
             efficiency_layers.append(efficiency_layer)
             x = efficiency_layer(x)
             
@@ -251,10 +251,8 @@ def build_efficiency_model(model,attach_to,exclude=[],method='after',storage_pat
     assert isinstance(exclude,list)
     
     if class_module.get('tensorflow.python.keras.engine.network') == 'Network':
-        print('Found tensorflow.keras.Model')
         new_model = _tf_efficiency_model(model,attach_to,exclude,method,storage_path)
     elif class_module.get('torch.nn.modules.module') == 'Module':
-        print('Found torch.nn.Module')
         new_model = _pt_efficiency_model(model,attach_to,exclude,method,storage_path)
 
     return new_model
