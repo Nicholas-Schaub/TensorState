@@ -2,15 +2,16 @@ import setuptools
 import numpy, os
 from Cython.Build import cythonize
 import Cython.Compiler.Options
+from pathlib import Path
 Cython.Compiler.Options.annotate = True
 
 os.environ['CFLAGS'] = '-march=native -O3'
 os.environ['CXXFLAGS'] = '-march=native -O3'
 
-with open(Path(__file__).joinpath("VERSION"),'r') as fh:
+with open(Path(__file__).parent.joinpath("VERSION"),'r') as fh:
     version = fh.read()
     
-with open(Path(__file__).open("README.md", "r") as fh:
+with open(Path(__file__).parent.joinpath("README.md"), "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
