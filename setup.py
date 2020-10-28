@@ -5,8 +5,8 @@ import Cython.Compiler.Options
 from pathlib import Path
 Cython.Compiler.Options.annotate = True
 
-os.environ['CFLAGS'] = '-march=native -O3'
-os.environ['CXXFLAGS'] = '-march=native -O3'
+os.environ['CFLAGS'] = '-march=haswell -O3'
+os.environ['CXXFLAGS'] = '-march=haswell -O3'
 
 with open(Path(__file__).parent.joinpath("VERSION"),'r') as fh:
     version = fh.read()
