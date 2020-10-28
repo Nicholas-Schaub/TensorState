@@ -12,6 +12,7 @@
 #
 import os
 import sys
+from pathlib import Path
 sys.path.insert(0, os.path.abspath('../..'))
 sys.setrecursionlimit(1500)
 
@@ -22,7 +23,7 @@ copyright = '2020, Nicholas J Schaub'
 author = 'Nicholas J Schaub'
 
 # The full version, including alpha/beta/rc tags
-with open("VERSION",'r') as fh:
+with open(Path(__file__).parent.parent.parent.joinpath("VERSION"),'r') as fh:
     release = fh.read()
 
 # -- General configuration ---------------------------------------------------

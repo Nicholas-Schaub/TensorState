@@ -13,9 +13,9 @@ def compress_states(states):
     neurons in the layer.
 
     Args:
-        states ([numpy.ndarray]): A 2d array of neuron outputs as np.float32 or
-            np.bool_ values, where columns are a particular neuron's value, and
-            rows are states.
+        states ([numpy.ndarray]): A 2d array of neuron outputs as numpy.float32
+            or np.bool_ values, where columns are a particular neuron's value,
+            and rows are states.
     
     Returns:
         numpy.ndarray: A 2d array of uint8 values, where each value is the

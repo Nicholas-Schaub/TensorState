@@ -7,10 +7,10 @@ Cython.Compiler.Options.annotate = True
 os.environ['CFLAGS'] = '-march=native -O3'
 os.environ['CXXFLAGS'] = '-march=native -O3'
 
-with open("VERSION",'r') as fh:
+with open(Path(__file__).joinpath("VERSION"),'r') as fh:
     version = fh.read()
     
-with open("README.md", "r") as fh:
+with open(Path(__file__).open("README.md", "r") as fh:
     long_description = fh.read()
 
 setuptools.setup(
