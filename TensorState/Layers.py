@@ -216,7 +216,7 @@ class AbstractStateCapture(abc.ABC):
             self.counts()
             self._state_ids = []
             states = self.raw_states[self._index[self._edges[:-1]],:].tobytes()
-            delta = int(self.max_entropy())
+            delta = int((self.max_entropy()-1)//8 + 1)
             for cindex in range(0,delta * (self._edges.shape[0]-1),delta):
                 self._state_ids.append(states[cindex:cindex+delta])
             
@@ -397,8 +397,6 @@ try:
             self._channel_index = 1
 
         def __call__(self,*args):
-            # if args[0].training:
-            #     return
             
             if self._input_shape == None:
                 self.reset_states(tuple(args[-1].shape))

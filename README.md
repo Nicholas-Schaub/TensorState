@@ -28,8 +28,3 @@ pre-requisites for compiling before installing with `pip`.
 ## Documentation
 
 https://tensorstate.readthedocs.io/en/latest/
-
-## Important Information
-
-The current release is an alpha version, meaning there is no gauruntee that
-breaking changes will not be made in the near future.
