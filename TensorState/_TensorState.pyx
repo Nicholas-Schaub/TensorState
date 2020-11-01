@@ -169,7 +169,7 @@ cpdef _lex_sort(unsigned char [:,:] states,
 @cython.wraparound(False)
 @cython.initializedcheck(False)
 cdef void __compress_tensor_ps(const float[:,:] input,
-                               unsigned char [:,:] result):
+                               unsigned char [:,:] result) nogil:
 
     # Initialize variables
     cdef __m256 substate
