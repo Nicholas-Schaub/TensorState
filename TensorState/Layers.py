@@ -405,7 +405,7 @@ try:
             inputs = args[-1].permute(0,2,3,1).contiguous()
             
             # Store the data using a thread
-            self._compress_and_store(inputs.detach().cpu().numpy())
+            self._threads.append(self._executor.submit(self._compress_and_store,inputs.detach().cpu().numpy()))
 
 except ModuleNotFoundError:
     
