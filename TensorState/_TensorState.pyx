@@ -2,7 +2,6 @@
 cimport cython
 cimport numpy as np
 import numpy as np
-from libcpp.vector cimport vector
 from cython.parallel import prange
 
 IF UNAME_SYSNAME == "Windows":
@@ -32,7 +31,7 @@ IF UNAME_SYSNAME == "Windows":
 
         __m256 _mm256_loadu_ps(__m256* __A) nogil
 
-        int _mm256_movemask_ps(__m256 __A) nogil
+        unsigned char _mm256_movemask_ps(__m256 __A) nogil
 
 ELSE:
     cdef extern from "x86intrin.h":
@@ -158,8 +157,8 @@ cdef long long __lex_sort(unsigned char [:,:] states,
 cpdef _lex_sort(unsigned char [:,:] states,
                 long long state_count):
 
-    cdef np.ndarray index = np.arange(states.shape[0],dtype=np.int64)
-    cdef np.ndarray bin_edges = np.zeros(states.shape[0],dtype=np.int64)
+    cdef np.ndarray index = np.arange(state_count,dtype=np.int64)
+    cdef np.ndarray bin_edges = np.zeros(state_count+1,dtype=np.int64)
     cdef long long count = 1
 
     count = __lex_sort(states,index,0,state_count,states.shape[1]-1,bin_edges,count)
@@ -170,7 +169,7 @@ cpdef _lex_sort(unsigned char [:,:] states,
 @cython.wraparound(False)
 @cython.initializedcheck(False)
 cdef void __compress_tensor_ps(const float[:,:] input,
-                               unsigned char [:,:] result) nogil:
+                               unsigned char [:,:] result):
 
     # Initialize variables
     cdef __m256 substate
@@ -181,12 +180,14 @@ cdef void __compress_tensor_ps(const float[:,:] input,
     rows,cols = input.shape[0], input.shape[1]
     
     cdef unsigned char shift = cols % 8
+    cdef unsigned char temp
     for col in range(0,cols-shift,8):
         col_shift = col
         col_floor = col_shift//8
         for row in range(rows):
             substate = _mm256_loadu_ps(&input[row,col_shift])
-            result[row,col_floor] = _mm256_movemask_ps(substate) ^ 0xFF
+            temp = (_mm256_movemask_ps(substate) ^ 0xFF)
+            result[row,col_floor] = temp
     
     if shift > 0:
         col_shift = cols - shift
@@ -198,6 +199,7 @@ cdef void __compress_tensor_ps(const float[:,:] input,
         for row in range(rows):
             substate = _mm256_loadu_ps(&input[row,col_shift])
             mask = _mm256_movemask_ps(substate)
+            temp = (mask ^ 0xFF) & value_truncate
             result[row,col_floor] = (mask ^ 0xFF) & value_truncate
 
 @cython.boundscheck(False)
@@ -207,12 +209,12 @@ cpdef np.ndarray _compress_tensor_ps(const float [:,:] input):
     # Initialize the output
     cdef long long rows = input.shape[0]
     cdef long long cols = input.shape[1]
-    cdef np.ndarray result = np.zeros((rows,int(np.ceil(cols/8))), dtype = np.uint8)
+    cdef np.ndarray result = np.zeros((rows+1,int(np.ceil(cols/8))), dtype = np.uint8)
 
     # Call the nogil method
     __compress_tensor_ps(input,result)
 
-    return result
+    return result[:-1,:]
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
