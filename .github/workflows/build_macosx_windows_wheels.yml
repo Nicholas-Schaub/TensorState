@@ -6,8 +6,6 @@ on:
     branches:    
       - master
       - dev
-    paths:
-      - 'VERSION'
   release:
     types: [created]
 
