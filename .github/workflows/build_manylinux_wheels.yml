@@ -2,14 +2,12 @@ name: Build manylinux wheels, upload to PyPI upon release
 
 # Update on when VERSION changes
 on:
-    push:
-      branches:    
-        - master
-        - dev
-      paths:
-        - 'VERSION'
-    release:
-      types: [created]
+  push:
+    branches:    
+      - master
+      - dev
+  release:
+    types: [created]
 
 jobs:
   build:
