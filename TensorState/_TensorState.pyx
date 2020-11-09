@@ -190,6 +190,7 @@ cdef void __compress_tensor_ps(const float[:,:] input,
     rows,cols = input.shape[0], input.shape[1]
     
     cdef unsigned char shift = cols % 8
+    cdef unsigned char temp
     for col in range(0,cols-shift,8):
         col_shift = col
         col_floor = col_shift//8
