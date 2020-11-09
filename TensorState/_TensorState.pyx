@@ -66,7 +66,7 @@ ELSE:
 
         unsigned char _mm256_movemask_ps(__m256 __A) nogil
 
-        __m256 _mm256_cmp_ps(__m256i __A, __m256i B, int imm8) nogil
+        __m256 _mm256_cmp_ps(__m256 __A, __m256 B, int imm8) nogil
 
         __m256 _mm256_setzero_ps() nogil
 
