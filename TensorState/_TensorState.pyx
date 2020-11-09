@@ -33,6 +33,10 @@ IF UNAME_SYSNAME == "Windows":
 
         unsigned char _mm256_movemask_ps(__m256 __A) nogil
 
+        __m256 _mm256_cmp_ps(__m256 __A, __m256 B, int imm8) nogil
+
+        __m256 _mm256_setzero_ps() nogil
+
 ELSE:
     cdef extern from "x86intrin.h":
         # Type definitions
@@ -60,7 +64,12 @@ ELSE:
 
         __m256 _mm256_loadu_ps(__m256* __A) nogil
 
-        int _mm256_movemask_ps(__m256 __A) nogil
+        unsigned char _mm256_movemask_ps(__m256 __A) nogil
+
+        __m256 _mm256_cmp_ps(__m256i __A, __m256i B, int imm8) nogil
+
+        __m256 _mm256_setzero_ps() nogil
+
 @cython.boundscheck(False)
 @cython.wraparound(False)
 @cython.initializedcheck(False)
@@ -173,6 +182,7 @@ cdef void __compress_tensor_ps(const float[:,:] input,
 
     # Initialize variables
     cdef __m256 substate
+    cdef __m256 zeros = _mm256_setzero_ps()
     cdef long long rows, cols, row, col, col_shift, col_floor, i
     cdef unsigned int value_truncate = 0
     
@@ -180,14 +190,13 @@ cdef void __compress_tensor_ps(const float[:,:] input,
     rows,cols = input.shape[0], input.shape[1]
     
     cdef unsigned char shift = cols % 8
-    cdef unsigned char temp
     for col in range(0,cols-shift,8):
         col_shift = col
         col_floor = col_shift//8
         for row in range(rows):
             substate = _mm256_loadu_ps(&input[row,col_shift])
-            temp = (_mm256_movemask_ps(substate) ^ 0xFF)
-            result[row,col_floor] = temp
+            substate = _mm256_cmp_ps(substate,zeros,0x0e)
+            result[row,col_floor] = _mm256_movemask_ps(substate)
     
     if shift > 0:
         col_shift = cols - shift
@@ -198,9 +207,9 @@ cdef void __compress_tensor_ps(const float[:,:] input,
             
         for row in range(rows):
             substate = _mm256_loadu_ps(&input[row,col_shift])
+            substate = _mm256_cmp_ps(substate,zeros,0x0e)
             mask = _mm256_movemask_ps(substate)
-            temp = (mask ^ 0xFF) & value_truncate
-            result[row,col_floor] = (mask ^ 0xFF) & value_truncate
+            result[row,col_floor] = mask & value_truncate
 
 @cython.boundscheck(False)
 @cython.wraparound(False)
