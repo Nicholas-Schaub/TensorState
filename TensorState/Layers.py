@@ -6,6 +6,10 @@ import TensorState
 from pathlib import Path
 import numpy as np
 
+logging.basicConfig(format='%(asctime)s - %(name)-10s - %(levelname)-8s - %(message)s',
+                    datefmt='%d-%b-%y %H:%M:%S')
+logger = logging.getLogger('TensorState.Layers')
+
 try:
     import cupy
     has_cupy = True
@@ -136,16 +140,29 @@ class AbstractStateCapture(abc.ABC):
             self._state_shape[0] += self._chunk_size[0]
             self._raw_states.resize(self._state_shape)
         
-        # Compress and store the states
+        # Resize the array using the appropriate library
         if has_cupy and isinstance(inputs,cupy.ndarray):
-            states = ts.compress_states(cupy.reshape(inputs,(-1,int(inputs.shape[-1]))))
-            states = cupy.asnumpy(states)
+            logger.debug('_compress_and_store: cupy.reshape')
+            states = cupy.reshape(inputs,(-1,int(inputs.shape[-1])))
         else:
-            states = ts.compress_states(np.reshape(inputs,(-1,int(inputs.shape[-1]))))
+            logger.debug('_compress_and_store: numpy.reshape')
+            states = np.reshape(inputs,(-1,int(inputs.shape[-1])))
+        
+        # Compress states
+        states = ts.compress_states(states)
+            
+        # If using cupy array, cast back to numpy
+        if has_cupy and isinstance(states,cupy.ndarray):
+            logger.debug('_compress_and_store: cupy -> numpy')
+            states = states.get()
+            
+        # Store numpy array
+        logger.debug('_compress_and_store: zarr storage')
         self._raw_states[self._state_count:self._state_count+num_states] = states
         self._state_count += num_states
         
         # Reset the _counts and _state_ids so they are recalculated
+        logger.debug('_compress_and_store: reset bins')
         self._counts = None
         self._state_ids = None
         self._states = None
@@ -319,6 +336,7 @@ class AbstractStateCapture(abc.ABC):
 
 try:
     import tensorflow.keras as keras
+    from tensorflow.experimental.dlpack import to_dlpack
     
     class StateCapture(keras.layers.Layer,AbstractStateCapture):
         """Tensorflow keras layer to capture states in keras models
@@ -336,8 +354,14 @@ try:
         def call(self, inputs):
             if inputs.shape[0] == None:
                 return inputs
+            
+            if has_cupy and 'GPU' in inputs.device:
+                capsule = to_dlpack(inputs)
+                states = cupy.fromDlpack(capsule)
+            else:
+                states = inputs
 
-            self._threads.append(self._executor.submit(self._compress_and_store,inputs))
+            self._threads.append(self._executor.submit(self._compress_and_store,states))
             
             return inputs
             
