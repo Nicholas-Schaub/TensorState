@@ -103,7 +103,7 @@ class AbstractStateCapture(abc.ABC):
                 classes that inerit from AbstractStateCapture.
         """
         
-        self._executor = ThreadPoolExecutor(3)
+        self._executor = ThreadPoolExecutor(4)
         
         # Assign a name to the layer. Some inheriting classes make name
         # protected, so catch the error just in case.
@@ -424,8 +424,8 @@ try:
             inputs = args[-1].permute(0,2,3,1).contiguous()
             
             # Store the data using a thread
-            self._thread(inputs.detach())
-            # self._threads.append(self._executor.submit(self._thread,inputs.detach()))
+            # self._thread(inputs.detach())
+            self._threads.append(self._executor.submit(self._thread,inputs.detach()))
 
 except ModuleNotFoundError:
     
