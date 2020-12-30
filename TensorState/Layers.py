@@ -138,11 +138,9 @@ class AbstractStateCapture(abc.ABC):
         
         # Compress and store the states
         if has_cupy and isinstance(inputs,cupy.ndarray):
-            # print('Using CuPy')
             states = ts.compress_states(cupy.reshape(inputs,(-1,int(inputs.shape[-1]))))
             states = cupy.asnumpy(states)
         else:
-            # print('Using NumPy')
             states = ts.compress_states(np.reshape(inputs,(-1,int(inputs.shape[-1]))))
         self._raw_states[self._state_count:self._state_count+num_states] = states
         self._state_count += num_states
