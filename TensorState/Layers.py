@@ -133,7 +133,7 @@ class AbstractStateCapture(abc.ABC):
         
     def _compress_and_store(self,inputs):
         # Calculate the number of states to process
-        num_states = inputs.shape[0] * int(np.prod(inputs.shape[1:-1]))
+        num_states = int(np.prod(inputs.shape[0:-1]))
         
         # Resize the zarr array if needed
         if 2*num_states + self._state_count >= self._raw_states.shape[0]:
@@ -392,27 +392,6 @@ except ModuleNotFoundError:
         def __init__(self,name,disk_path=None,**kwargs):
             raise ModuleNotFoundError('StateCapture class is unavailable since'+
                                       ' tensorflow was not found.')
-            
-        def call(self, inputs):
-            if inputs.shape[0] == None:
-                return inputs
-
-            self._threads.append(self._executor.submit(self._compress_and_store,inputs))
-            
-            return inputs
-            
-        def build(self,input_shape):
-            """Build the StateCapture Keras Layer
-
-            This method initializes the layer and resets any previously held
-            data. The zarr array is initialized in this method.
-
-            Args:
-                input_shape (TensorShape): Either a TensorShape or list of
-                    TensorShape instances.
-            """
-            
-            self.reset_states(input_shape)
 
 try:
     import torch
@@ -445,11 +424,11 @@ try:
                 self.reset_states(tuple(args[-1].shape))
 
             # Transform the tensor to have similar memory format as Tensorflow
-            inputs = args[-1].permute(0,2,3,1).contiguous()
+            dim_order = (0,) + tuple(i for i in range(2,args[-1].ndim)) + (1,)
+            inputs = args[-1].detach().permute(*dim_order).contiguous()
             
             # Store the data using a thread
-            # self._thread(inputs.detach())
-            self._threads.append(self._executor.submit(self._thread,inputs.detach()))
+            self._threads.append(self._executor.submit(self._thread,inputs))
 
 except ModuleNotFoundError:
     
