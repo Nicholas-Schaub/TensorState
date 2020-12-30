@@ -23,6 +23,14 @@ Precompiled wheels exist for Windows 10, Linux, and MacOS for Python versions
 
 ``pip install TensorState``
 
+As of TensorState v0.3.0, many operations will be performed on Nvidia GPUs if
+CuPy is installed. This can lead to significant improvement in performance
+because in addition to the data being processed in parallel on the GPU, less
+data is transferred over the bus since data is compressed before sending to main
+memory.
+
+`Please read the CuPy documentation on how to install for your version of Cuda. <https://docs.cupy.dev/en/stable/install.html>`_.
+
 ---------------
 Troubleshooting
 ---------------
@@ -72,7 +80,7 @@ Other Information
 -----------------
 
 The compile code uses compiler intrinsics found in most CPUs created in 2015 or
-later. As long as the CPU is haswell or later, there shoulnd't be any issues.
+later. As long as the CPU is haswell or later, there shouldn't be any issues.
 
 Currently, there is no fallback for working on platforms that do not have a C++
 compiler or are working on platforms other than x86 architectures such as ARM.

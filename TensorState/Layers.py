@@ -6,6 +6,12 @@ import TensorState
 from pathlib import Path
 import numpy as np
 
+try:
+    import cupy
+    has_cupy = True
+except ModuleNotFoundError:
+    has_cupy = False
+
 class AbstractStateCapture(abc.ABC):
     """Base class for capturing state space information in a neural network.
 
@@ -97,7 +103,7 @@ class AbstractStateCapture(abc.ABC):
                 classes that inerit from AbstractStateCapture.
         """
         
-        self._executor = ThreadPoolExecutor(2)
+        self._executor = ThreadPoolExecutor(4)
         
         # Assign a name to the layer. Some inheriting classes make name
         # protected, so catch the error just in case.
@@ -131,7 +137,12 @@ class AbstractStateCapture(abc.ABC):
             self._raw_states.resize(self._state_shape)
         
         # Compress and store the states
-        self._raw_states[self._state_count:self._state_count+num_states] = ts.compress_states(np.reshape(inputs,(-1,int(inputs.shape[-1]))))
+        if has_cupy and isinstance(inputs,cupy.ndarray):
+            states = ts.compress_states(cupy.reshape(inputs,(-1,int(inputs.shape[-1]))))
+            states = cupy.asnumpy(states)
+        else:
+            states = ts.compress_states(np.reshape(inputs,(-1,int(inputs.shape[-1]))))
+        self._raw_states[self._state_count:self._state_count+num_states] = states
         self._state_count += num_states
         
         # Reset the _counts and _state_ids so they are recalculated
@@ -395,6 +406,14 @@ try:
             super().__init__(name,disk_path,**kwargs)
             
             self._channel_index = 1
+            
+        def _thread(self,tensor):
+            
+            if has_cupy and tensor.device.type == 'cuda':
+                tensor = cupy.asarray(tensor)
+            else:
+                tensor = (tensor > 0).cpu().numpy()
+            self._compress_and_store(tensor)
 
         def __call__(self,*args):
             
@@ -405,7 +424,8 @@ try:
             inputs = args[-1].permute(0,2,3,1).contiguous()
             
             # Store the data using a thread
-            self._threads.append(self._executor.submit(self._compress_and_store,inputs.detach().cpu().numpy()))
+            # self._thread(inputs.detach())
+            self._threads.append(self._executor.submit(self._thread,inputs.detach()))
 
 except ModuleNotFoundError:
     
