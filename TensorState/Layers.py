@@ -6,6 +6,16 @@ import TensorState
 from pathlib import Path
 import numpy as np
 
+logging.basicConfig(format='%(asctime)s - %(name)-10s - %(levelname)-8s - %(message)s',
+                    datefmt='%d-%b-%y %H:%M:%S')
+logger = logging.getLogger('TensorState.Layers')
+
+try:
+    import cupy
+    has_cupy = True
+except ModuleNotFoundError:
+    has_cupy = False
+
 class AbstractStateCapture(abc.ABC):
     """Base class for capturing state space information in a neural network.
 
@@ -97,7 +107,7 @@ class AbstractStateCapture(abc.ABC):
                 classes that inerit from AbstractStateCapture.
         """
         
-        self._executor = ThreadPoolExecutor(2)
+        self._executor = ThreadPoolExecutor(4)
         
         # Assign a name to the layer. Some inheriting classes make name
         # protected, so catch the error just in case.
@@ -123,18 +133,36 @@ class AbstractStateCapture(abc.ABC):
         
     def _compress_and_store(self,inputs):
         # Calculate the number of states to process
-        num_states = inputs.shape[0] * int(np.prod(inputs.shape[1:-1]))
+        num_states = int(np.prod(inputs.shape[0:-1]))
         
         # Resize the zarr array if needed
         if 2*num_states + self._state_count >= self._raw_states.shape[0]:
             self._state_shape[0] += self._chunk_size[0]
             self._raw_states.resize(self._state_shape)
         
-        # Compress and store the states
-        self._raw_states[self._state_count:self._state_count+num_states] = ts.compress_states(np.reshape(inputs,(-1,int(inputs.shape[-1]))))
+        # Resize the array using the appropriate library
+        if has_cupy and isinstance(inputs,cupy.ndarray):
+            logger.debug('_compress_and_store: cupy.reshape')
+            states = cupy.reshape(inputs,(-1,int(inputs.shape[-1])))
+        else:
+            logger.debug('_compress_and_store: numpy.reshape')
+            states = np.reshape(inputs,(-1,int(inputs.shape[-1])))
+        
+        # Compress states
+        states = ts.compress_states(states)
+            
+        # If using cupy array, cast back to numpy
+        if has_cupy and isinstance(states,cupy.ndarray):
+            logger.debug('_compress_and_store: cupy -> numpy')
+            states = states.get()
+            
+        # Store numpy array
+        logger.debug('_compress_and_store: zarr storage')
+        self._raw_states[self._state_count:self._state_count+num_states] = states
         self._state_count += num_states
         
         # Reset the _counts and _state_ids so they are recalculated
+        logger.debug('_compress_and_store: reset bins')
         self._counts = None
         self._state_ids = None
         self._states = None
@@ -308,6 +336,7 @@ class AbstractStateCapture(abc.ABC):
 
 try:
     import tensorflow.keras as keras
+    from tensorflow.experimental.dlpack import to_dlpack
     
     class StateCapture(keras.layers.Layer,AbstractStateCapture):
         """Tensorflow keras layer to capture states in keras models
@@ -325,8 +354,14 @@ try:
         def call(self, inputs):
             if inputs.shape[0] == None:
                 return inputs
+            
+            if has_cupy and 'GPU' in inputs.device:
+                capsule = to_dlpack(inputs)
+                states = cupy.fromDlpack(capsule)
+            else:
+                states = inputs
 
-            self._threads.append(self._executor.submit(self._compress_and_store,inputs))
+            self._threads.append(self._executor.submit(self._compress_and_store,states))
             
             return inputs
             
@@ -357,27 +392,6 @@ except ModuleNotFoundError:
         def __init__(self,name,disk_path=None,**kwargs):
             raise ModuleNotFoundError('StateCapture class is unavailable since'+
                                       ' tensorflow was not found.')
-            
-        def call(self, inputs):
-            if inputs.shape[0] == None:
-                return inputs
-
-            self._threads.append(self._executor.submit(self._compress_and_store,inputs))
-            
-            return inputs
-            
-        def build(self,input_shape):
-            """Build the StateCapture Keras Layer
-
-            This method initializes the layer and resets any previously held
-            data. The zarr array is initialized in this method.
-
-            Args:
-                input_shape (TensorShape): Either a TensorShape or list of
-                    TensorShape instances.
-            """
-            
-            self.reset_states(input_shape)
 
 try:
     import torch
@@ -395,6 +409,14 @@ try:
             super().__init__(name,disk_path,**kwargs)
             
             self._channel_index = 1
+            
+        def _thread(self,tensor):
+            
+            if has_cupy and tensor.device.type == 'cuda':
+                tensor = cupy.asarray(tensor)
+            else:
+                tensor = (tensor > 0).cpu().numpy()
+            self._compress_and_store(tensor)
 
         def __call__(self,*args):
             
@@ -402,10 +424,11 @@ try:
                 self.reset_states(tuple(args[-1].shape))
 
             # Transform the tensor to have similar memory format as Tensorflow
-            inputs = args[-1].permute(0,2,3,1).contiguous()
+            dim_order = (0,) + tuple(i for i in range(2,args[-1].ndim)) + (1,)
+            inputs = args[-1].detach().permute(*dim_order).contiguous()
             
             # Store the data using a thread
-            self._threads.append(self._executor.submit(self._compress_and_store,inputs.detach().cpu().numpy()))
+            self._threads.append(self._executor.submit(self._thread,inputs))
 
 except ModuleNotFoundError:
     

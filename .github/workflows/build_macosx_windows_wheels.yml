@@ -16,12 +16,12 @@ jobs:
     strategy:
       matrix:
         os: [macos-latest,windows-latest]
-        python-version: [3.6,3.7, 3.8]
+        python-version: [3.6,3.7,3.8,3.9]
     steps:
       # check-out this repository
       - uses: actions/checkout@v2
       # Install Miniconda, as specificed by this repository's environment.yml
-      - uses: goanpeca/setup-miniconda@v1
+      - uses: conda-incubator/setup-miniconda@v2
         with:
            activate-environment: tensorwheels
            environment-file: .github/conda-build-environment-${{ matrix.os }}.yml

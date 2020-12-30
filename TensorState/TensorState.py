@@ -184,7 +184,7 @@ def _tf_efficiency_model(model,attach_to,exclude,method,storage_path):
         # Add layer after if requested
         if method in ['after','both']\
             and (layer.__class__.__name__ in attach_to or layer.name in attach_to) \
-            and (layer.__class__.__name__ not in exclude or layer.name in exclude):
+            and (layer.__class__.__name__ not in exclude and layer.name not in exclude):
                 
             efficiency_layer = StateCapture(name=layer.name+'_post_states',disk_path=storage_path)
             efficiency_layers.append(efficiency_layer)

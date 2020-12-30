@@ -11,6 +11,12 @@ information. This can create some issues when trying to install on architectures
 do not include prepackaged wheels. Please read the appropriate section carefully
 to make sure installation of the package is successful.
 
+As of TensorState v0.3.0, many operations can be performed on Nvidia GPUs if
+CuPy is installed. This can lead to significant improvement in performance
+because in addition to the data being processed in parallel on the GPU, less
+data is transferred over the bus since data is compressed before sending to main
+memory.
+
 Most dependencies should be installed when using ``pip``, however some may not
 be installed.
 
@@ -19,9 +25,13 @@ Simple Installation
 -------------------
 
 Precompiled wheels exist for Windows 10, Linux, and MacOS for Python versions 
-3.6 to 3.8. No special dependencies are required.
+3.6 to 3.9. No special dependencies are required, but it is assumed that either
+TensorFlow >= 2.2 and PyTorch >= 1.6 has already been installed.
 
 ``pip install TensorState``
+
+For Cuda acceleration of TensorState operations,
+`please read the CuPy documentation on how to install for your version of Cuda. <https://docs.cupy.dev/en/stable/install.html>`_.
 
 ---------------
 Troubleshooting
@@ -72,7 +82,7 @@ Other Information
 -----------------
 
 The compile code uses compiler intrinsics found in most CPUs created in 2015 or
-later. As long as the CPU is haswell or later, there shoulnd't be any issues.
+later. As long as the CPU is haswell or later, there shouldn't be any issues.
 
 Currently, there is no fallback for working on platforms that do not have a C++
 compiler or are working on platforms other than x86 architectures such as ARM.
