@@ -3,5 +3,9 @@
     "restructuredtext.confPath": "${workspaceFolder}\\docs\\source",
     "restructuredtext.updateOnTextChanged"    : "true",
     "restructuredtext.updateDelay": 300,
-    "editor.rulers": [80]
+    "editor.rulers": [
+        80
+    ],
+    "esbonio.sphinx.buildDir": "${workspaceFolder}/build",
+    "esbonio.sphinx.confDir": "${workspaceFolder}\\docs\\source"
 }

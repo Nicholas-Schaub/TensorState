@@ -111,7 +111,7 @@ def epoch_func(x,y,train=False):
         optimizer.step()
         optimizer.zero_grad()
     
-    return loss,accuracy,num
+    return loss.detach().numpy(),accuracy.detach().numpy(),num
 
 for epoch in range(num_epochs):
     start = time.time()
@@ -144,6 +144,8 @@ for epoch in range(num_epochs):
 
     if val_count >= patience:
         break
+
+    break
 
 """ Evaluate model efficiency """
 # Attach StateCapture layers to the model
