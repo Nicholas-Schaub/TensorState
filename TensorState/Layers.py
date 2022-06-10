@@ -443,6 +443,14 @@ try:
                 tensor = (tensor > 0).cpu().numpy()
             self._compress_and_store(tensor)
 
+        def _thread(self, tensor):
+
+            if has_cupy and tensor.device.type == "cuda":
+                tensor = cupy.asarray(tensor)
+            else:
+                tensor = (tensor > 0).cpu().numpy()
+            self._compress_and_store(tensor)
+
         def __call__(self, *args):
 
             if self._input_shape == None:
