@@ -4,7 +4,7 @@ cimport numpy as np
 import numpy as np
 from cython.parallel import prange
 
-IF UNAME_SYSNAME == "Windows":
+IF UNAME_SYSNAME == u"Windows":
     cdef extern from "immintrin.h":
         # Type definitions
         ctypedef int __m128i

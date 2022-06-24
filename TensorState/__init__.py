@@ -33,7 +33,7 @@ except ModuleNotFoundError:
 logger.info('has_tf: {}'.format(has_tf))
 
 from .TensorState import reset_efficiency_model, build_efficiency_model, \
-                         entropy, aIQ, network_efficiency
+                         entropy, aIQ, network_efficiency, remove_state_layers
 from .Layers import *
 from .States import *
 from ._TensorState import *

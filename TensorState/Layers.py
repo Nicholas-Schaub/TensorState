@@ -1,4 +1,7 @@
-import zarr, abc, logging
+import zarr
+import abc
+import logging
+from typing import List, Optional, Union
 
 from concurrent.futures import ThreadPoolExecutor, wait
 import TensorState.States as ts
@@ -55,7 +58,7 @@ class AbstractStateCapture(abc.ABC):
 
     @property
     def state_count(self):
-        """The total number of observed states, including repeats."""
+        """Total number of observed states, including repeats."""
         self._wait_for_threads()
         return self._state_count
 
@@ -65,7 +68,7 @@ class AbstractStateCapture(abc.ABC):
 
     @property
     def states(self):
-        """Decompressed state data"""
+        """Decompressed state data."""
         self._wait_for_threads()
         if not isinstance(self._states, np.ndarray):
             self._states = ts.decompress_states(
@@ -81,7 +84,7 @@ class AbstractStateCapture(abc.ABC):
 
     @property
     def raw_states(self):
-        """Raw state data as stored in memory, bit compressed"""
+        """Raw state data as stored in memory, bit compressed."""
         self._wait_for_threads()
         return self._raw_states.oindex
 
@@ -101,7 +104,7 @@ class AbstractStateCapture(abc.ABC):
     _channel_index = -1
 
     def __init__(self, name, disk_path=None, **kwargs):
-        """Default initialization
+        """Abstract State Capture Layer.
 
         Args:
             name (string): Name of the state capture layer.
@@ -112,7 +115,6 @@ class AbstractStateCapture(abc.ABC):
             **kwargs: Keyword arguments. Used for passing arguments to other
                 classes that inerit from AbstractStateCapture.
         """
-
         self._executor = ThreadPoolExecutor(4)
 
         # Assign a name to the layer. Some inheriting classes make name
@@ -175,8 +177,39 @@ class AbstractStateCapture(abc.ABC):
 
         return True
 
+    def states_per_instance(self):
+
+        num_states = (
+            np.prod(self._input_shape[1:]) / self._input_shape[self._channel_index]
+        )
+
+        return num_states
+
+    def _instance_indices(self, index: Union[int, List[int], np.ndarray]) -> np.ndarray:
+        # Convert to numpy array if needed
+        if not isinstance(index, np.ndarray):
+            if isinstance(index, int):
+                index = [index]
+            index = np.asarray(index).squeeze()
+
+        # Make sure the array is one dimensional
+        index = index.squeeze()
+        if index.ndim > 2:
+            raise ValueError("index must be a 1-dimensional numpy array.")
+
+        # If numpy array indices are boolean, convert them to indices
+        if index.dtype == np.bool_:
+            index = np.argwhere(index)
+
+        # Convert instance indices to state indices
+        states_per_instance = self.states_per_instance()
+        state_offsets = np.arange(states_per_instance, dtype=int).reshape(1, -1)
+        state_indices = states_per_instance * index.reshape(-1, 1) + state_offsets
+
+        return state_indices.flatten()
+
     def reset_states(self, input_shape=None):
-        """Initialize the state space
+        """Initialize the state space.
 
         This method initializes the layer and resets any previously held data.
         The zarr array is initialized in this method.
@@ -184,7 +217,6 @@ class AbstractStateCapture(abc.ABC):
         Args:
             input_shape (TensorShape,tuple, list): Shape of the input.
         """
-
         if not isinstance(input_shape, type(None)):
             self._input_shape = input_shape
 
@@ -237,7 +269,7 @@ class AbstractStateCapture(abc.ABC):
                 )
 
     def state_ids(self):
-        """Identity of observed states
+        r"""Identity of observed states.
 
         This method returns a list of byte arrays. Each byte array corresponds
         to a unique observed state, where each bit in the byte array corresponds
@@ -255,7 +287,6 @@ class AbstractStateCapture(abc.ABC):
         Returns:
             [list of Bytes]: Unique states observed by the layer
         """
-
         if not isinstance(self._state_ids, list):
             self.counts()
             self._state_ids = []
@@ -266,8 +297,10 @@ class AbstractStateCapture(abc.ABC):
 
         return self._state_ids
 
-    def counts(self):
-        """Layer state counts
+    def counts(
+        self, index: Optional[Union[int, List[int], np.ndarray]] = None
+    ) -> List[int]:
+        """Layer state counts.
 
         This method returns a numpy.array of integers, where each integer is the
         number of times a state is observed. The identity of the states can be
@@ -276,22 +309,36 @@ class AbstractStateCapture(abc.ABC):
         NOTE: The list only contains counts for observed states, so all values
         will be >0
 
+        Args:
+            index: Indices of instances to retrieve state counts for. If ``None``, then
+                all counts are returned. Defaults to ``None``.
+
         Returns:
             [list of ``int``]: Counts of stat occurences
         """
+        if not isinstance(self._counts, np.ndarray) or index is not None:
 
-        if not isinstance(self._counts, np.ndarray):
+            if index is None:
+                rows = slice(0, self.state_count)
+                count = self.state_count
+            else:
+                rows = self._instance_indices(index)
+                count = rows.size
 
             # Create the index and sort the data to find the bin edges
-            self._edges, self._index = ts.sort_states(
-                self.raw_states[: self.state_count, :], self.state_count
-            )
-            self._counts = np.diff(self._edges)
+            _edges, _index = ts.sort_states(self.raw_states[rows, :], count)
+            _counts = np.diff(_edges)
+
+            if index is None:
+                self._edges, self._index = _edges, _index
+                self._counts = _counts
+
+            return _counts
 
         return self._counts
 
     def max_entropy(self):
-        """Theoretical maximum entropy for the layer
+        """Theoretical maximum entropy for the layer.
 
         The maximum entropy for the layer is equal to the number of neurons in
         the layer. This is different than the maximum entropy value that would
@@ -304,7 +351,7 @@ class AbstractStateCapture(abc.ABC):
         return float(self._input_shape[self._channel_index])
 
     def entropy(self, alpha=1):
-        """Calculate the entropy of the layer
+        """Calculate the entropy of the layer.
 
         Calculate the entropy from the observed states. The alpha value is the
         order of entropy calculated using the formula for Renyi entropy. When
@@ -317,14 +364,13 @@ class AbstractStateCapture(abc.ABC):
         Returns:
             [float]: The entropy of the layer
         """
-
         if alpha == None:
             return self.max_entropy()
         else:
             return TensorState.entropy(self.counts(), alpha)
 
     def efficiency(self, alpha1=1, alpha2=None):
-        """Calculate the efficiency of the layer
+        """Calculate the efficiency of the layer.
 
         This method returns the efficiency of the layer. Originally, the
         efficiency was defined as the ratio of Shannon's entropy to the
@@ -342,12 +388,10 @@ class AbstractStateCapture(abc.ABC):
         Returns:
             [float]: The efficiency of the layer
         """
-
         assert isinstance(alpha1, (float, int)), "alpha1 must be a float or int"
         assert isinstance(
             alpha2, (float, int, None.__class__)
-        ), "alpha2 must be a\
-                                                           float, int, or None"
+        ), "alpha2 must be a float, int, or None"
         if alpha2 != None:
             assert alpha1 > alpha2, "alpha1 must be larger than alpha 2"
 
@@ -359,7 +403,7 @@ try:
     from tensorflow.experimental.dlpack import to_dlpack
 
     class StateCapture(keras.layers.Layer, AbstractStateCapture):
-        """Tensorflow keras layer to capture states in keras models
+        """Tensorflow keras layer to capture states in keras models.
 
         This class is designed to be used in a Tensorflow keras model to
         automate the capturing of neurons states as data is passed through the
@@ -389,7 +433,7 @@ try:
             return inputs
 
         def build(self, input_shape):
-            """Build the StateCapture Keras Layer
+            """Build the StateCapture Keras Layer.
 
             This method initializes the layer and resets any previously held
             data. The zarr array is initialized in this method.
@@ -398,13 +442,12 @@ try:
                 input_shape (TensorShape): Either a TensorShape or list of
                     TensorShape instances.
             """
-
             self.reset_states(input_shape)
 
 except ModuleNotFoundError:
 
     class StateCapture(AbstractStateCapture):
-        """Tensorflow keras layer to capture states in keras models
+        """Tensorflow keras layer to capture states in keras models.
 
         This class is designed to be used in a Tensorflow keras model to
         automate the capturing of neurons states as data is passed through the
@@ -422,7 +465,7 @@ try:
     import torch
 
     class StateCaptureHook(AbstractStateCapture):
-        """StateCapture hook for PyTorch
+        """StateCapture hook for PyTorch.
 
         This class implements all methods in AbstractStateCapture, but is
         designed to be a pre or post hook for a layer.
@@ -436,7 +479,6 @@ try:
             self._channel_index = 1
 
         def _thread(self, tensor):
-
             if has_cupy and tensor.device.type == "cuda":
                 tensor = cupy.asarray(tensor)
             else:
@@ -444,7 +486,6 @@ try:
             self._compress_and_store(tensor)
 
         def _thread(self, tensor):
-
             if has_cupy and tensor.device.type == "cuda":
                 tensor = cupy.asarray(tensor)
             else:
@@ -452,7 +493,6 @@ try:
             self._compress_and_store(tensor)
 
         def __call__(self, *args):
-
             if self._input_shape == None:
                 self.reset_states(tuple(args[-1].shape))
 
@@ -466,7 +506,7 @@ try:
 except ModuleNotFoundError:
 
     class StateCaptureHook(AbstractStateCapture):
-        """StateCapture hook for PyTorch
+        """StateCapture hook for PyTorch.
 
         This class implements all methods in AbstractStateCapture, but is
         designed to be a pre or post hook for a layer.
