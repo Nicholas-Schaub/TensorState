@@ -20,11 +20,11 @@ sys.setrecursionlimit(1500)
 # -- Project information -----------------------------------------------------
 
 project = "TensorState"
-copyright = "2020, Nicholas J Schaub"
+copyright = "2020-2023, Nicholas J Schaub"
 author = "Nicholas J Schaub"
 
 # The full version, including alpha/beta/rc tags
-with open(Path(__file__).parent.parent.parent.joinpath("VERSION")) as fh:
+with open(Path(__file__).parent.parent.parent.joinpath("VERSION.txt")) as fh:
     release = fh.read()
 
 # -- General configuration ---------------------------------------------------
