@@ -36,3 +36,5 @@ except ModuleNotFoundError:
     has_tf = False
 
 logger.info(f"has_tf: {has_tf}")
+
+__version__ = "0.3.0"
