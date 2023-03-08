@@ -1,13 +1,12 @@
-import os
 import logging
-
+import os
 from collections import OrderedDict
-from typing import Dict, Callable
 
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # noqa: E402
 
-from TensorState.Layers import StateCapture, StateCaptureHook
-import numpy as np
+import numpy as np  # noqa: E402
+
+from TensorState.Layers import StateCapture, StateCaptureHook  # noqa: E402
 
 logging.basicConfig(
     format="%(asctime)s - %(name)-10s - %(levelname)-8s - %(message)s",
@@ -18,17 +17,16 @@ logger.setLevel(logging.WARNING)
 
 
 def network_efficiency(efficiencies):
-    """Calculate the network efficiency
+    """Calculate the network efficiency.
 
     This method calculates the neural network efficiency, defined as the
     geometric mean of the efficiency values calculated for the network.
 
     Args:
-        efficiencies ([list,keras.Model,torch.nn.Module]): A list of efficiency
-            values (floats) or a keras.Model
+        efficiencies: A list of efficiency values (floats) or a ``keras.Model``
 
     Returns:
-        [float]: The network efficiency
+        The network efficiency
     """
     # Get the efficiency values for the keras model
     if hasattr(efficiencies, "efficiency_layers"):
@@ -50,7 +48,7 @@ def network_efficiency(efficiencies):
 
 
 def aIQ(net_efficiency, accuracy, weight):
-    """Calculate the artificial intelligence quotient
+    """Calculate the artificial intelligence quotient.
 
     The artificial intelligence quotient (aIQ) is a simple metric to report a
     balance of neural network efficiency and task performance. Although not
@@ -63,15 +61,15 @@ def aIQ(net_efficiency, accuracy, weight):
     the accuracy of the model.
 
     Args:
-        net_efficiency ([float]): A float ranging from 0.0-1.0
-        accuracy ([float]): A float ranging from 0.0-1.0
-        weight ([int]): An integer with value >=1
+        net_efficiency: A float ranging from 0.0-1.0
+        accuracy: A float ranging from 0.0-1.0
+        weight: An integer with value >=1
 
     Raises:
-        ValueError: Raised if weight <= 0
+        Raised if weight <= 0
 
     Returns:
-        [float]: The artificial intelligence quotient
+        The artificial intelligence quotient
     """
     if weight <= 0 or not isinstance(weight, int):
         raise ValueError("aIQ weight must be an integer greater than 0.")
@@ -80,7 +78,7 @@ def aIQ(net_efficiency, accuracy, weight):
 
 
 def entropy(counts, alpha=1):
-    """Calculate the Renyi entropy
+    """Calculate the Renyi entropy.
 
     The Renyi entropy is a general definition of entropy that encompasses
     Shannon's entropy, Hartley (maximum) entropy, and min-entropy. It is defined
@@ -91,12 +89,12 @@ def entropy(counts, alpha=1):
     By default, this method sets alpha=1, which is Shannon's entropy.
 
     Args:
-        counts (numpy.ndarray): Array of counts representing number of times a
-            state is observed.
-        alpha ([int,float], optional): Entropy order. Defaults to 1.
+        counts: Array of counts representing number of times a state is
+            observed.
+        alpha: Entropy order. Defaults to 1.
 
     Returns:
-        [float]: The entropy of the count data.
+        The entropy of the count data.
     """
     num_microstates = counts.sum()
     frequencies = counts / num_microstates
@@ -109,22 +107,20 @@ def entropy(counts, alpha=1):
 
 
 def reset_efficiency_model(model):
-    """Reset all efficiency layers/hooks in a model
+    """Reset all efficiency layers/hooks in a model.
 
     This method resets all efficiency layers or hooks in a model, setting the
     ``state_count=0``. This is useful for repeated evaluation of a model
     during a single session.
 
     Args:
-        model ([keras.Model, torch.nn.Module]): Model to reset
+        model: Model to reset
     """
-
     for layer in model.efficiency_layers:
         layer.reset_states()
 
 
 def _pt_efficiency_model(model, attach_to, exclude, method, storage_path):
-
     model.efficiency_layers = []
     model.state_capture_hooks = []
 
@@ -140,7 +136,6 @@ def _pt_efficiency_model(model, attach_to, exclude, method, storage_path):
     )
 
     for cls_name, mod_name, module in layer_ids.values():
-
         if (
             cls_name not in attach_to or mod_name in exclude
         ) and mod_name not in attach_to:
@@ -148,7 +143,6 @@ def _pt_efficiency_model(model, attach_to, exclude, method, storage_path):
 
         # Add pre-hook if requested
         if method in ["before", "both"]:
-
             efficiency_layer = StateCaptureHook(
                 name=str(mod_name) + "_pre_states", disk_path=storage_path
             )
@@ -159,7 +153,6 @@ def _pt_efficiency_model(model, attach_to, exclude, method, storage_path):
             )
 
         if method in ["after", "both"]:
-
             efficiency_layer = StateCaptureHook(
                 name=str(mod_name) + "_post_states", disk_path=storage_path
             )
@@ -194,7 +187,6 @@ def _tf_efficiency_model(model, attach_to, exclude, method, storage_path):
     model_outputs = []
     efficiency_layers = []
     for layer in model.layers[1:]:
-
         # Determine input tensorss
         layer_input = [
             network_dict["new_output_tensor_of"][layer_aux]
@@ -209,7 +201,6 @@ def _tf_efficiency_model(model, attach_to, exclude, method, storage_path):
             and (layer.__class__.__name__ in attach_to or layer.name in attach_to)
             and (layer.__class__.__name__ not in exclude or layer.name in exclude)
         ):
-
             efficiency_layer = StateCapture(
                 name=network_dict["input_layers_of"][layer.name][0] + "_pre_states",
                 disk_path=storage_path,
@@ -230,7 +221,6 @@ def _tf_efficiency_model(model, attach_to, exclude, method, storage_path):
             and (layer.__class__.__name__ in attach_to or layer.name in attach_to)
             and (layer.__class__.__name__ not in exclude and layer.name not in exclude)
         ):
-
             efficiency_layer = StateCapture(
                 name=layer.name + "_post_states", disk_path=storage_path
             )
@@ -255,7 +245,7 @@ def _tf_efficiency_model(model, attach_to, exclude, method, storage_path):
 def build_efficiency_model(
     model, attach_to, exclude=[], method="after", storage_path=None
 ):
-    """Attach state capture methods to a neural network
+    """Attach state capture methods to a neural network.
 
     This method takes an existing neural network model and attaches either
     layers or hooks to the model to capture the states of neural network layers.
@@ -270,26 +260,22 @@ def build_efficiency_model(
     consistency the model is returned from this function.
 
     Args:
-        model ([keras.Model, torch.nn.Module]): A Keras model
-        attach_to (list, optional): List of strings indicating the types of
-            layers to attach to. Names of layers can also be specified
-            to attach StateCapture to specific layers
-        exclude (list, optional): List of strings indicating the names of layers
-            to not attach StateCapture layers to. This will override the
-            attach_to keyword, so that a Conv2D layer with the name specified
-            by exclude will not have a StateCapture layer attached to it.
-            Defaults to [].
-        method (str, optional): The location to attach the StateCapture layer
-            to. Must be one of ['before','after','both'].
-            Defaults to 'after'.
-        storage_path ([str, pathlib.Path], optional): Path on disk to store
-            states in zarr format. If None, states are stored in memory.
-            Defaults to None.
+        model: A Keras model
+        attach_to: List of strings indicating the types of layers to attach to.
+            Names of layers can also be specified to attach StateCapture to
+            specific layers
+        exclude: List of strings indicating the names of layers to not attach
+            StateCapture layers to. This will override the attach_to keyword, so
+            that a Conv2D layer with the name specified by exclude will not have
+            a StateCapture layer attached to it. Defaults to [].
+        method: The location to attach the StateCapture layer to. Must be one of
+            ['before','after','both']. Defaults to 'after'.
+        storage_path: Path on disk to store states in zarr format. If None,
+            states are stored in memory. Defaults to None.
 
     Returns:
         model: A model of the same type as the input model
     """
-
     class_module = {cls.__module__: cls.__name__ for cls in model.__class__.__bases__}
 
     # Validate input arguments
@@ -317,7 +303,17 @@ def build_efficiency_model(
 
 
 def remove_state_layers(model) -> None:
+    """Remove state capture layers.
 
+    Note:
+        Currently only works with PyTorch.
+
+    Args:
+        model: The model to remove hooks from.
+
+    Returns:
+        A model with state capture layers removed.
+    """
     if hasattr(model, "state_capture_hooks"):
         for hook in model.state_capture_hooks:
             hook.remove()

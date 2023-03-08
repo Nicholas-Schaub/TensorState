@@ -1,7 +1,9 @@
 import logging
+
+import numpy as np
+
 import TensorState._TensorState as ts
 from TensorState import has_cupy
-import numpy as np
 
 logging.basicConfig(
     format="%(asctime)s - %(name)-10s - %(levelname)-8s - %(message)s",
@@ -44,7 +46,7 @@ if has_cupy:
 
 
 def compress_states(states):
-    """Compress a state space tensors
+    """Compress a state space tensor.
 
     This function quantizes neurons into firing (>0) or non-firing (<=0), then
     compresses the bits into uint8 values. Thus, if a layer has 8 neurons in it,
@@ -55,15 +57,14 @@ def compress_states(states):
     neurons in the layer.
 
     Args:
-        states ([numpy.ndarray]): A 2d array of neuron outputs as numpy.float32
-            or np.bool_ values, where columns are a particular neuron's value,
-            and rows are states.
+        states: A 2d array of neuron outputs as numpy.float32 or np.bool_
+            values, where columns are a particular neuron's value, and rows are
+            states.
 
     Returns:
-        numpy.ndarray: A 2d array of uint8 values, where each value is the
-            compressed representation of the state.
+        A 2d array of uint8 values, where each value is the compressed
+            representation of the state.
     """
-
     logger.debug("compress_states")
 
     if isinstance(states, np.ndarray):
@@ -83,7 +84,7 @@ def compress_states(states):
 
 
 def sort_states(states, state_count):
-    """Sort the states to place identical states next to each other
+    """Sort the states to place identical states next to each other.
 
     This function sorts the states stored in a 2d numpy.ndarray so that
     identical states are placed next to each other. To increase speed, the
@@ -92,16 +93,15 @@ def sort_states(states, state_count):
     and the location of unique states in the sorted index.
 
     Args:
-        states ([numpy.ndarray]): A 2d array of compressed states.
-            See ``compress_states`` function.
-        state_count ([int]): The number of states (or number of rows to sort).
+        states: A 2d array of compressed states. See ``compress_states``
+            function.
+        state_count: The number of states (or number of rows to sort).
 
     Returns:
-        edges ([np.ndarray]): Bin edges, or locations of unique states
-        index ([np.ndarray]): Sorted index. This output can be used to actually
-            sort the input states by doing ``states[index]``
+        A tuple containing bin edges, or locations of unique states, and a
+            sorted index, which can be used to sort the input states using
+            ``states[index]``
     """
-
     logger.debug("sort_states")
     if has_cupy:
         logger.debug("sort_states: cupy.lexsort")
@@ -122,7 +122,7 @@ def sort_states(states, state_count):
 
 
 def decompress_states(states, num_neurons):
-    """Decompress states to numpy array of booleans
+    """Decompress states to numpy array of booleans.
 
     This functions takes a 2d numpy array of compressed neuron states and
     returns a boolean array of states, where each column of values represents
@@ -141,14 +141,12 @@ def decompress_states(states, num_neurons):
     [False, True, True, True, True]
 
     Args:
-        states ([numpy.ndarray]): A 2d array of compressed states.
-            See ``compress_states`` function.
-        num_neurons ([int]): The number of neurons in the layer.
+        states: A 2d array of compressed states. See ``compress_states``
+            function.
+        num_neurons: The number of neurons in the layer.
 
     Returns:
-        decompressed_states ([np.ndarray]): Boolean numpy array of neuron states
-
+        Boolean numpy array of neuron states
     """
-
     logger.debug("_decompress_tensor")
     return ts._decompress_tensor(states, num_neurons)

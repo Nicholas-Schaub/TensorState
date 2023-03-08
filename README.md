@@ -1,4 +1,4 @@
-# TensorState - Neural Network Efficiency Tools
+# TensorState (v0.3.0) - Neural Network Efficiency Tools
 
 TensorState is a toolbox to capture neural network information to better
 understand how information flows through the network. The core of the toolbox is

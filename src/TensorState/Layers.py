@@ -1,13 +1,14 @@
-import zarr
 import abc
 import logging
-from typing import List, Optional, Union
-
-from concurrent.futures import ThreadPoolExecutor, wait
-import TensorState.States as ts
-import TensorState
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from pathlib import Path
+from typing import List, Optional, Tuple, Union
+
 import numpy as np
+import zarr
+
+import TensorState
+import TensorState.States as ts
 
 logging.basicConfig(
     format="%(asctime)s - %(name)-10s - %(levelname)-8s - %(message)s",
@@ -51,10 +52,10 @@ class AbstractStateCapture(abc.ABC):
 
     """
 
-    _chunk_size = 0
-    _state_shape = tuple()
-    _entropy = None
-    _state_count = 0
+    _chunk_size: int = 0
+    _state_shape: Tuple
+    _entropy: Optional[float] = None
+    _state_count: int = 0
 
     @property
     def state_count(self):
@@ -99,7 +100,7 @@ class AbstractStateCapture(abc.ABC):
     _counts = None
     _input_shape = None
     _state_ids = None
-    _threads = []
+    _threads: List[Future] = []
     _zarr_path = None
     _channel_index = -1
 
@@ -125,7 +126,7 @@ class AbstractStateCapture(abc.ABC):
             pass
 
         # Set up zarr, but don't create anything
-        if disk_path != None:
+        if disk_path is not None:
             if not isinstance(disk_path, Path):
                 self._zarr_path = Path(disk_path)
             else:
@@ -178,7 +179,8 @@ class AbstractStateCapture(abc.ABC):
         return True
 
     def states_per_instance(self):
-
+        """Average number of states per input instance."""
+        # TODO: Verify this is correct for Tensorflow and PyTorch
         num_states = (
             np.prod(self._input_shape[1:]) / self._input_shape[self._channel_index]
         )
@@ -220,7 +222,7 @@ class AbstractStateCapture(abc.ABC):
         if not isinstance(input_shape, type(None)):
             self._input_shape = input_shape
 
-        if self._input_shape == None:
+        if self._input_shape is None:
             raise ValueError(
                 "The input_shape is None, and no previous input "
                 + "shape information was provided. The first time "
@@ -243,13 +245,13 @@ class AbstractStateCapture(abc.ABC):
         self._state_shape = list(self._chunk_size)
         self._state_count = 0
 
-        if self._raw_states != None:
+        if self._raw_states is not None:
             # Zero out states and resize if zarr already open
             self._raw_states.resize(self._state_shape)
             self._raw_states[:] = 0
         else:
             # Initialize the zarr array
-            if self._zarr_path != None:
+            if self._zarr_path is not None:
                 if self._zarr_path.is_file():
                     self._zarr_path.unlink()
 
@@ -314,16 +316,15 @@ class AbstractStateCapture(abc.ABC):
                 all counts are returned. Defaults to ``None``.
 
         Returns:
-            [list of ``int``]: Counts of stat occurences
+            Counts of stat occurences
         """
         if not isinstance(self._counts, np.ndarray) or index is not None:
-
             if index is None:
                 rows = slice(0, self.state_count)
                 count = self.state_count
             else:
-                rows = self._instance_indices(index)
-                count = rows.size
+                rows = self._instance_indices(index)  # type: ignore
+                count = rows.size  # type: ignore
 
             # Create the index and sort the data to find the bin edges
             _edges, _index = ts.sort_states(self.raw_states[rows, :], count)
@@ -364,7 +365,7 @@ class AbstractStateCapture(abc.ABC):
         Returns:
             [float]: The entropy of the layer
         """
-        if alpha == None:
+        if alpha is None:
             return self.max_entropy()
         else:
             return TensorState.entropy(self.counts(), alpha)
@@ -392,7 +393,7 @@ class AbstractStateCapture(abc.ABC):
         assert isinstance(
             alpha2, (float, int, None.__class__)
         ), "alpha2 must be a float, int, or None"
-        if alpha2 != None:
+        if alpha2 is not None:
             assert alpha1 > alpha2, "alpha1 must be larger than alpha 2"
 
         return self.entropy(alpha1) / self.entropy(alpha2)
@@ -408,16 +409,31 @@ try:
         This class is designed to be used in a Tensorflow keras model to
         automate the capturing of neurons states as data is passed through the
         network.
-
         """
 
         def __init__(self, name, disk_path=None, **kwargs):
+            """Initialize a state capture layer.
+
+            Args:
+                name: The name of the layer
+                disk_path: If specified, data will be stored on disk in a zarr
+                    file rather than in memory This is useful for large networks
+                    or when running on large data sets. Defaults to None.
+            """
             # Use both parent class initializers
             keras.layers.Layer.__init__(self, name=name, **kwargs)
             AbstractStateCapture.__init__(self, name, disk_path=disk_path, **kwargs)
 
         def call(self, inputs):
-            if inputs.shape[0] == None:
+            """Process layer states.
+
+            Args:
+                inputs: The tensor used to get states.
+
+            Returns:
+                The input tensor, to pass information to subsequent layers.
+            """
+            if inputs.shape[0] is None:
                 return inputs
 
             if has_cupy and "GPU" in inputs.device:
@@ -446,7 +462,7 @@ try:
 
 except ModuleNotFoundError:
 
-    class StateCapture(AbstractStateCapture):
+    class StateCapture(AbstractStateCapture):  # type: ignore
         """Tensorflow keras layer to capture states in keras models.
 
         This class is designed to be used in a Tensorflow keras model to
@@ -455,14 +471,14 @@ except ModuleNotFoundError:
 
         """
 
-        def __init__(self, name, disk_path=None, **kwargs):
+        def __init__(self, name, disk_path=None, **kwargs):  # noqa: D107
             raise ModuleNotFoundError(
                 "StateCapture class is unavailable since" + " tensorflow was not found."
             )
 
 
 try:
-    import torch
+    pass
 
     class StateCaptureHook(AbstractStateCapture):
         """StateCapture hook for PyTorch.
@@ -472,7 +488,7 @@ try:
 
         """
 
-        def __init__(self, name, disk_path=None, **kwargs):
+        def __init__(self, name, disk_path=None, **kwargs):  # noqa: D107
             # Use both parent class initializers
             super().__init__(name, disk_path, **kwargs)
 
@@ -485,15 +501,8 @@ try:
                 tensor = (tensor > 0).cpu().numpy()
             self._compress_and_store(tensor)
 
-        def _thread(self, tensor):
-            if has_cupy and tensor.device.type == "cuda":
-                tensor = cupy.asarray(tensor)
-            else:
-                tensor = (tensor > 0).cpu().numpy()
-            self._compress_and_store(tensor)
-
-        def __call__(self, *args):
-            if self._input_shape == None:
+        def __call__(self, *args):  # noqa: D102
+            if self._input_shape is None:
                 self.reset_states(tuple(args[-1].shape))
 
             # Transform the tensor to have similar memory format as Tensorflow
@@ -505,7 +514,7 @@ try:
 
 except ModuleNotFoundError:
 
-    class StateCaptureHook(AbstractStateCapture):
+    class StateCaptureHook(AbstractStateCapture):  # type: ignore
         """StateCapture hook for PyTorch.
 
         This class implements all methods in AbstractStateCapture, but is
@@ -513,7 +522,7 @@ except ModuleNotFoundError:
 
         """
 
-        def __init__(self, name, disk_path=None, **kwargs):
+        def __init__(self, name, disk_path=None, **kwargs):  # noqa: D107
             raise ModuleNotFoundError(
                 "StateCaptureHook class is unavailable" + " since torch was not found."
             )

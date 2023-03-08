@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "TensorState"
+version = "0.3.0"
+description = ""
+authors = ["Nicholas-Schaub <nicholas.j.schaub@gmail.com>"]
+readme = "README.md"
+packages = [{include = "TensorState", from = "src"}]
+
+[tool.poetry.build]
+script = "build.py"
+generate-setup-file = true
+
+[tool.poetry.dependencies]
+python = "^3.8.1"
+numpy = "^1.24.2"
+zarr = "^2.14.2"
+numcodecs = "^0.11.0"
+
+
+[tool.poetry.group.dev.dependencies]
+cython = "3.0.0a11"
+black = "^23.1.0"
+mypy = "^1.1.1"
+flake8 = "^6.0.0"
+flake8-docstrings = "^1.7.0"
+isort = "^5.12.0"
+pre-commit = "^3.1.1"
+
+[build-system]
+requires = ["poetry-core", "setuptools>=67.5.1", "Cython==3.0.0a11", "numpy>=1.24.2"]
+build-backend = "poetry.core.masonry.api"

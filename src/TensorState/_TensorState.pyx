@@ -13,20 +13,20 @@ IF UNAME_SYSNAME == u"Windows":
 
         # Intrinsic definitions
         unsigned long long _pext_u64(unsigned long long a,unsigned long long b) nogil
-        
+
         __m128i _mm_cmpeq_epi8(__m128i a,__m128i b) nogil
-        
+
         __m128i _mm_shuffle_epi8(__m128i __A,__m128i __B) nogil
-        
+
         __m128i _mm_and_si128(__m128i __A,__m128i __B) nogil
-        
+
         __m128i _mm_storeu_si128(__m128i* __A,__m128i __B) nogil
 
         __m128i _mm_set_epi8(char e15,char e14,char e13,char e12,
                              char e11,char e10,char e9, char e8,
                              char e7, char e6, char e5, char e4,
                              char e3, char e2, char e1, char e0) nogil
-        
+
         __m128i _mm_set1_epi16(unsigned short __A) nogil
 
         __m256 _mm256_loadu_ps(__m256* __A) nogil
@@ -46,20 +46,20 @@ ELSE:
 
         # Intrinsic definitions
         unsigned long long _pext_u64(unsigned long long a,unsigned long long b) nogil
-        
+
         __m128i _mm_cmpeq_epi8(__m128i a,__m128i b) nogil
-        
+
         __m128i _mm_shuffle_epi8(__m128i __A,__m128i __B) nogil
-        
+
         __m128i _mm_and_si128(__m128i __A,__m128i __B) nogil
-        
+
         __m128i _mm_storeu_si128(__m128i* __A,__m128i __B) nogil
 
         __m128i _mm_set_epi8(char e15,char e14,char e13,char e12,
                              char e11,char e10,char e9, char e8,
                              char e7, char e6, char e5, char e4,
                              char e3, char e2, char e1, char e0) nogil
-        
+
         __m128i _mm_set1_epi16(unsigned short __A) nogil
 
         __m256 _mm256_loadu_ps(__m256* __A) nogil
@@ -105,7 +105,7 @@ cdef void __byte_sort(unsigned char [:,:] states,
             total += count
             remaining_partitions[num_partitions] = i
             num_partitions += 1
-        
+
         next_offset[i] = total
 
     # Swap index values into place
@@ -157,7 +157,7 @@ cdef long long __lex_sort(unsigned char [:,:] states,
             if counts[i] > 0:
                 bin_edges[count] = bin_edges[count-1] + counts[i]
                 count += 1
-    
+
     return count
 
 @cython.boundscheck(False)
@@ -185,10 +185,10 @@ cdef void __compress_tensor_ps(const float[:,:] input,
     cdef __m256 zeros = _mm256_setzero_ps()
     cdef long long rows, cols, row, col, col_shift, col_floor, i
     cdef unsigned int value_truncate = 0
-    
+
     # Get the number of rows and cols in the input
     rows,cols = input.shape[0], input.shape[1]
-    
+
     cdef unsigned char shift = cols % 8
     cdef unsigned char temp
     for col in range(0,cols-shift,8):
@@ -198,14 +198,14 @@ cdef void __compress_tensor_ps(const float[:,:] input,
             substate = _mm256_loadu_ps(&input[row,col_shift])
             substate = _mm256_cmp_ps(substate,zeros,0x0e)
             result[row,col_floor] = _mm256_movemask_ps(substate)
-    
+
     if shift > 0:
         col_shift = cols - shift
         col_floor = col_shift//8
         value_truncate = 0
         for i in range(shift):
             value_truncate += 2**i
-            
+
         for row in range(rows):
             substate = _mm256_loadu_ps(&input[row,col_shift])
             substate = _mm256_cmp_ps(substate,zeros,0x0e)
@@ -240,24 +240,24 @@ cdef void __compress_tensor_pi8(const unsigned char [:,:] input,
 
     # Magic number to pack bools
     magic = 0x0101010101010101
-    
+
     # Get the number of rows and cols in the input
     rows,cols = input.shape[0], input.shape[1]
-    
+
     cdef unsigned char shift = cols % 8
     for col in range(0,cols-shift,8):
         col_floor = col//8
         for row in range(rows):
             substate = _pext_u64(cython.operator.dereference(<unsigned long long *> &input[row,col]),magic)
             result[row,col_floor] = substate & 0xFF
-    
+
     if shift > 0:
         col_shift = cols - shift
         col_floor = col_shift//8
         value_truncate = 0
         for i in range(shift):
             value_truncate += 2**i
-            
+
         for row in range(rows):
             substate = _pext_u64(cython.operator.dereference(<unsigned long long *> &input[row,col_shift]),magic)
             result[row,col_floor] = (substate & 0xFF) & value_truncate
@@ -303,7 +303,7 @@ cdef void __decompress_tensor(unsigned char [:] input,
     cdef long long num_bytes = (n_neurons-1)//8 + 1
     cdef __m128i states, shuffle_states, mask_states, nonzeros
 
-    index = 0 
+    index = 0
     while index < n_states:
 
         neuron_index = index//num_bytes*n_neurons
