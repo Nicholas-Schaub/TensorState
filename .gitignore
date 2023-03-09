@@ -161,6 +161,7 @@ cython_debug/
 
 *.cpp
 setup.py
+.data
 data
 TensorState.egg-info
 TensorState/_TensorState.cp*

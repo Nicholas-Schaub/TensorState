@@ -6,11 +6,12 @@ import time
 from pathlib import Path
 
 import numpy as np
-import requests
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader, TensorDataset
+from torchvision.datasets import MNIST
+from torchvision.transforms import ToTensor
 
 import TensorState as ts
 
@@ -20,33 +21,11 @@ dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 """ Load MNIST and transform it """
 # Set up the directories
 DATA_PATH = Path("data")
-PATH = DATA_PATH / "mnist"
-PATH.mkdir(parents=True, exist_ok=True)
+train_ds = MNIST(DATA_PATH, transform=ToTensor(), train=True, download=True)
+valid_ds = MNIST(DATA_PATH, transform=ToTensor(), train=False, download=True)
 
-# Download the data if it doesn't exist
-URL = "http://deeplearning.net/data/mnist/"
-FILENAME = "mnist.pkl.gz"
-if not (PATH / FILENAME).exists():
-    content = requests.get(URL + FILENAME).content
-    (PATH / FILENAME).open("wb").write(content)
-
-# Load the data
-train_rand = 0.1  # percentage of training data to randomize
-with gzip.open((PATH / FILENAME).as_posix(), "rb") as f:
-    ((x_train, y_train), (x_valid, y_valid), _) = pickle.load(f, encoding="latin-1")
-
-    y_train[: int(50000 * train_rand)] = np.random.randint(
-        10, size=(int(50000 * train_rand),)
-    )
-
-    x_train, y_train, x_valid, y_valid = map(
-        torch.tensor, (x_train, y_train, x_valid, y_valid)
-    )
-
-    train_ds = TensorDataset(x_train, y_train)
-    train_dl = DataLoader(train_ds, batch_size=200, shuffle=True)
-    valid_ds = TensorDataset(x_valid, y_valid)
-    valid_dl = DataLoader(valid_ds, batch_size=200)
+train_dl = DataLoader(train_ds, batch_size=200, shuffle=True)
+valid_dl = DataLoader(valid_ds, batch_size=200)
 
 """ Create a LeNet-5 model """
 # Set the random seed for reproducibility
@@ -149,8 +128,8 @@ for epoch in range(num_epochs):
         *[epoch_func(xb.to(dev), yb.to(dev), True) for xb, yb in train_dl]
     )
 
-    train_loss = np.sum(np.multiply(losses, nums)) / np.sum(nums)
-    train_accuracy = np.sum(np.multiply(accuracies, nums)) / np.sum(nums)
+    train_loss = sum(loss * n for loss, n in zip(losses, nums)) / sum(nums)
+    train_accuracy = sum(acc * n for acc, n in zip(accuracies, nums)) / sum(nums)
     efficiencies.append(
         {
             "train": {
@@ -170,8 +149,8 @@ for epoch in range(num_epochs):
             *[epoch_func(xb.to(dev), yb.to(dev), False) for xb, yb in valid_dl]
         )
 
-    valid_loss = np.sum(np.multiply(losses, nums)) / np.sum(nums)
-    valid_accuracy = np.sum(np.multiply(accuracies, nums)) / np.sum(nums)
+    valid_loss = sum(loss * n for loss, n in zip(losses, nums)) / sum(nums)
+    valid_accuracy = sum(acc * n for acc, n in zip(accuracies, nums)) / sum(nums)
     efficiencies[-1]["test"]["loss"] = valid_loss.cpu().item()
     efficiencies[-1]["test"]["accuracy"] = valid_accuracy.cpu().item()
     efficiencies[-1]["test"]["efficiency"] = [
@@ -180,12 +159,13 @@ for epoch in range(num_epochs):
     efficiencies[-1]["test"]["net_efficiency"] = ts.network_efficiency(model)
 
     print(
-        "Epoch {}/{} ({:.2f}s): TrainLoss={:.4f}, TrainAccuracy={:.2f}%, ValidLoss={:.4f}, ValidAccuracy={:.2f}%".format(
+        "Epoch {}/{} ({:.2f}s): TrainLoss={:.4f}, TrainAccuracy={:.2f}%, TrainEfficiency={:0.2f}, ValidLoss={:.4f}, ValidAccuracy={:.2f}%".format(
             str(epoch + 1).zfill(3),
             num_epochs,
             time.time() - start,
             train_loss,
             100 * train_accuracy,
+            100 * efficiencies[-1]["train"]["net_efficiency"],
             valid_loss,
             100 * valid_accuracy,
         )
