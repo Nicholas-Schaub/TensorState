@@ -15,8 +15,8 @@ torch_data = [
     pytest.param("QMNIST", marks=pytest.mark.all_data),
     pytest.param("EMNIST", marks=pytest.mark.all_data),
     pytest.param("FashionMNIST", marks=pytest.mark.all_data),
-    "CIFAR10",
-    pytest.param("CIFAR100", marks=pytest.mark.all_data),
+    pytest.param("CIFAR10", marks=pytest.mark.all_data),
+    "CIFAR100",
 ]
 
 
@@ -105,7 +105,7 @@ def model(request):
     return model, layer
 
 
-@pytest.fixture(params=[None, Path("./states")], autouse=True)
+@pytest.fixture(params=[None, Path("./states")])
 def disk_path(request, worker_id):
     path: Path = request.param
 

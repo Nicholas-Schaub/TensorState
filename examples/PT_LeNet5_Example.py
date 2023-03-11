@@ -13,8 +13,6 @@ import TensorState as ts
 
 # Set the device to run the model on (gpu if available, cpu otherwise)
 dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-print(f"device_count = {torch.cuda.device_count()}")
-print(f"device: {dev}")
 
 """ Load MNIST and transform it """
 # Set up the directories

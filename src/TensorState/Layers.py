@@ -47,11 +47,12 @@ class AbstractStateCapture(abc.ABC):
     data can be stored on disk to reduce memory consumption by using the
     disk_path keyword.
 
-    NOTE: This layer currently only works within Tensorflow Keras models and
-    PyTorch models.
+    NOTE: This layer currently only works within Tensorflow Keras models,
+    PyTorch models, and pytorch lightning models.
 
     """
 
+    capture_on: bool = True
     _chunk_size: int = 0
     _state_shape: Tuple
     _entropy: Optional[float] = None
@@ -219,7 +220,7 @@ class AbstractStateCapture(abc.ABC):
         Args:
             input_shape (TensorShape,tuple, list): Shape of the input.
         """
-        if not isinstance(input_shape, type(None)):
+        if input_shape is not None:
             self._input_shape = input_shape
 
         if self._input_shape is None:
@@ -436,6 +437,9 @@ try:
             if inputs.shape[0] is None:
                 return inputs
 
+            if not self.capture_on:
+                return inputs
+
             if has_cupy and "GPU" in inputs.device:
                 capsule = to_dlpack(inputs)
                 states = cupy.fromDlpack(capsule)
@@ -504,6 +508,9 @@ try:
         def __call__(self, *args):  # noqa: D102
             if self._input_shape is None:
                 self.reset_states(tuple(args[-1].shape))
+
+            if not self.capture_on:
+                return
 
             # Transform the tensor to have similar memory format as Tensorflow
             dim_order = (0,) + tuple(i for i in range(2, args[-1].ndim)) + (1,)

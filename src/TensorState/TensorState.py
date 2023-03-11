@@ -294,7 +294,10 @@ def build_efficiency_model(
         new_model = _tf_efficiency_model(
             model, attach_to, exclude, method, storage_path
         )
-    elif class_module.get("torch.nn.modules.module") == "Module":
+    elif (
+        class_module.get("torch.nn.modules.module") == "Module"
+        or class_module.get("lightning.pytorch.core.module") == "LightningModule"
+    ):
         new_model = _pt_efficiency_model(
             model, attach_to, exclude, method, storage_path
         )

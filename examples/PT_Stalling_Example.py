@@ -1,17 +1,16 @@
-import gzip
 import os
-import pickle
 import random
 import time
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import requests
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
+from torchvision.datasets import MNIST
+from torchvision.transforms import ToTensor
 
 import TensorState as ts
 
@@ -21,28 +20,12 @@ dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 """ Load MNIST and transform it """
 # Set up the directories
 DATA_PATH = Path("data")
-PATH = DATA_PATH / "mnist"
-PATH.mkdir(parents=True, exist_ok=True)
+train_ds = MNIST(DATA_PATH, transform=ToTensor(), train=True, download=True)
+valid_ds = MNIST(DATA_PATH, transform=ToTensor(), train=False, download=True)
 
-# Download the data if it doesn't exist
-URL = "http://deeplearning.net/data/mnist/"
-FILENAME = "mnist.pkl.gz"
-if not (PATH / FILENAME).exists():
-    content = requests.get(URL + FILENAME).content
-    (PATH / FILENAME).open("wb").write(content)
+train_dl = DataLoader(train_ds, batch_size=200, shuffle=True)
+valid_dl = DataLoader(valid_ds, batch_size=200)
 
-# Load the data
-with gzip.open((PATH / FILENAME).as_posix(), "rb") as f:
-    ((x_train, y_train), (x_valid, y_valid), _) = pickle.load(f, encoding="latin-1")
-
-    x_train, y_train, x_valid, y_valid = map(
-        torch.tensor, (x_train, y_train, x_valid, y_valid)
-    )
-
-    train_ds = TensorDataset(x_train, y_train)
-    train_dl = DataLoader(train_ds, batch_size=200, shuffle=True)
-    valid_ds = TensorDataset(x_valid, y_valid)
-    valid_dl = DataLoader(valid_ds, batch_size=200)
 """ Create a LeNet-5 model """
 # Set the random seed for reproducibility
 seed = 0
@@ -142,8 +125,8 @@ for epoch in range(num_epochs):
         *[epoch_func(xb.to(dev), yb.to(dev), True) for xb, yb in train_dl]
     )
 
-    train_loss = np.sum(np.multiply(losses, nums)) / np.sum(nums)
-    train_accuracy = np.sum(np.multiply(accuracies, nums)) / np.sum(nums)
+    train_loss = sum(loss * n for loss, n in zip(losses, nums)) / sum(nums)
+    train_accuracy = sum(acc * n for acc, n in zip(accuracies, nums)) / sum(nums)
     te_start = time.time()
     efficiencies.append(
         {
@@ -167,8 +150,8 @@ for epoch in range(num_epochs):
             *[epoch_func(xb.to(dev), yb.to(dev), False) for xb, yb in valid_dl]
         )
 
-    valid_loss = np.sum(np.multiply(losses, nums)) / np.sum(nums)
-    valid_accuracy = np.sum(np.multiply(accuracies, nums)) / np.sum(nums)
+    valid_loss = sum(loss * n for loss, n in zip(losses, nums)) / sum(nums)
+    valid_accuracy = sum(acc * n for acc, n in zip(accuracies, nums)) / sum(nums)
     ve_start = time.time()
     efficiencies[-1]["test"]["loss"] = valid_loss.cpu().item()
     efficiencies[-1]["test"]["accuracy"] = valid_accuracy.cpu().item()

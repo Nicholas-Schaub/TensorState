@@ -1,15 +1,14 @@
-import gzip
-import pickle
 import time
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import requests
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader
+from torchvision.datasets import MNIST
+from torchvision.transforms import ToTensor
 
 import TensorState as ts
 
@@ -19,28 +18,11 @@ dev = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 """ Load MNIST and transform it """
 # Set up the directories
 DATA_PATH = Path("data")
-PATH = DATA_PATH / "mnist"
-PATH.mkdir(parents=True, exist_ok=True)
+train_ds = MNIST(DATA_PATH, transform=ToTensor(), train=True, download=True)
+valid_ds = MNIST(DATA_PATH, transform=ToTensor(), train=False, download=True)
 
-# Download the data if it doesn't exist
-URL = "http://deeplearning.net/data/mnist/"
-FILENAME = "mnist.pkl.gz"
-if not (PATH / FILENAME).exists():
-    content = requests.get(URL + FILENAME).content
-    (PATH / FILENAME).open("wb").write(content)
-
-# Load the data
-with gzip.open((PATH / FILENAME).as_posix(), "rb") as f:
-    ((x_train, y_train), (x_valid, y_valid), _) = pickle.load(f, encoding="latin-1")
-
-    x_train, y_train, x_valid, y_valid = map(
-        torch.tensor, (x_train, y_train, x_valid, y_valid)
-    )
-
-    train_ds = TensorDataset(x_train, y_train)
-    train_dl = DataLoader(train_ds, batch_size=200, shuffle=True)
-    valid_ds = TensorDataset(x_valid, y_valid)
-    valid_dl = DataLoader(valid_ds, batch_size=200)
+train_dl = DataLoader(train_ds, batch_size=200, shuffle=True)
+valid_dl = DataLoader(valid_ds, batch_size=200)
 
 """ Create a LeNet-5 model """
 # Set the random seed for reproducibility
@@ -178,8 +160,8 @@ efficiency_model = ts.build_efficiency_model(
 efficiency_model.eval()
 
 # Calculate per class information
-Y = y_valid.numpy()
-X = x_valid.numpy()
+Y = valid_ds.data.numpy()
+X = valid_ds.targets.numpy()
 total_samples = 0
 state_dict = {}
 for c in range(10):
@@ -188,8 +170,7 @@ for c in range(10):
     ind = np.argwhere(Y == c).squeeze()
     print(f"# samples: {ind.size}")
 
-    class_ds = TensorDataset(x_valid[ind], y_valid[ind])
-    class_dl = DataLoader(class_ds, batch_size=200)
+    class_dl = DataLoader(valid_ds, batch_size=200)
 
     with torch.no_grad():
         losses, accuracies, nums = zip(
