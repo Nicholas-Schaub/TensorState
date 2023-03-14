@@ -44,12 +44,29 @@ torch_models = [
     ),
 ]
 
+compress_backend = [
+    pytest.param("numpy", marks=pytest.mark.use_cpu),
+    pytest.param("cupy", marks=pytest.mark.use_gpu),
+]
+
+decompress_backend = ["numpy"]
+
 
 def expand_channel(x: torch.Tensor) -> torch.Tensor:
     if x.shape[0] == 1:
         x = x.repeat_interleave(3, 0)
 
     return x
+
+
+@pytest.fixture(scope="module", params=compress_backend)
+def compression(request):
+    return request.param
+
+
+@pytest.fixture(scope="module", params=decompress_backend)
+def decompression(request):
+    return request.param
 
 
 @pytest.fixture(scope="module", params=torch_data)

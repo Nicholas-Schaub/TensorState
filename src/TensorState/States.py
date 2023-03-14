@@ -2,7 +2,7 @@ import logging
 
 import numpy as np
 
-import TensorState._TensorState as ts
+import TensorState._TensorState as _ts
 from TensorState import has_cupy
 
 logging.basicConfig(
@@ -70,10 +70,10 @@ def compress_states(states):
     if isinstance(states, np.ndarray):
         if states.dtype == np.float32:
             logger.debug("compress_states: _compress_tensor_ps")
-            return ts._compress_tensor_ps(states)
+            return _ts._compress_tensor_ps(states)
         elif states.dtype == np.bool_:
             logger.debug("compress_states: _compress_tensor_pi8")
-            return ts._compress_tensor_pi8(states)
+            return _ts._compress_tensor_pi8(states)
         else:
             raise TypeError("states must be numpy.float32 or numpy.bool_")
     elif has_cupy and isinstance(states, cupy.ndarray):
@@ -116,7 +116,7 @@ def sort_states(states, state_count):
         index = cupy.asnumpy(index)
     else:
         logger.debug("sort_states: tensorstate._lex_sort")
-        bin_edges, index = ts._lex_sort(states, state_count)
+        bin_edges, index = _ts._lex_sort(states, state_count)
 
     return bin_edges, index
 
@@ -149,4 +149,4 @@ def decompress_states(states, num_neurons):
         Boolean numpy array of neuron states
     """
     logger.debug("_decompress_tensor")
-    return ts._decompress_tensor(states, num_neurons)
+    return _ts._decompress_tensor(states, num_neurons)
