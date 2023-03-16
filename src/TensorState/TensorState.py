@@ -1,6 +1,7 @@
 import logging
 import os
 from collections import OrderedDict
+from typing import Union
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # noqa: E402
 
@@ -13,7 +14,7 @@ logging.basicConfig(
     datefmt="%d-%b-%y %H:%M:%S",
 )
 logger = logging.getLogger("TensorState")
-logger.setLevel(logging.WARNING)
+# logger.setLevel(logging.WARNING)
 
 
 def network_efficiency(efficiencies):
@@ -120,7 +121,9 @@ def reset_efficiency_model(model):
         layer.reset_states()
 
 
-def _pt_efficiency_model(model, attach_to, exclude, method, storage_path):
+def _pt_efficiency_model(
+    model, attach_to, exclude, method, storage_path, memory_device
+):
     model.efficiency_layers = []
     model.state_capture_hooks = []
 
@@ -144,7 +147,9 @@ def _pt_efficiency_model(model, attach_to, exclude, method, storage_path):
         # Add pre-hook if requested
         if method in ["before", "both"]:
             efficiency_layer = StateCaptureHook(
-                name=str(mod_name) + "_pre_states", disk_path=storage_path
+                name=str(mod_name) + "_pre_states",
+                disk_path=storage_path,
+                memory_device=memory_device,
             )
             model.efficiency_layers.append(efficiency_layer)
 
@@ -154,7 +159,9 @@ def _pt_efficiency_model(model, attach_to, exclude, method, storage_path):
 
         if method in ["after", "both"]:
             efficiency_layer = StateCaptureHook(
-                name=str(mod_name) + "_post_states", disk_path=storage_path
+                name=str(mod_name) + "_post_states",
+                disk_path=storage_path,
+                memory_device=memory_device,
             )
             model.efficiency_layers.append(efficiency_layer)
 
@@ -165,7 +172,9 @@ def _pt_efficiency_model(model, attach_to, exclude, method, storage_path):
     return model
 
 
-def _tf_efficiency_model(model, attach_to, exclude, method, storage_path):
+def _tf_efficiency_model(
+    model, attach_to, exclude, method, storage_path, memory_device
+):
     import tensorflow.keras as keras
 
     # Auxiliary dictionary to describe the network graph
@@ -243,7 +252,12 @@ def _tf_efficiency_model(model, attach_to, exclude, method, storage_path):
 
 
 def build_efficiency_model(
-    model, attach_to, exclude=[], method="after", storage_path=None
+    model,
+    attach_to,
+    exclude=[],
+    method="after",
+    storage_path=None,
+    memory_device: Union[str, int] = "cpu",
 ):
     """Attach state capture methods to a neural network.
 
@@ -292,14 +306,14 @@ def build_efficiency_model(
 
     if class_module.get("tensorflow.python.keras.engine.network") == "Network":
         new_model = _tf_efficiency_model(
-            model, attach_to, exclude, method, storage_path
+            model, attach_to, exclude, method, storage_path, memory_device
         )
     elif (
         class_module.get("torch.nn.modules.module") == "Module"
         or class_module.get("lightning.pytorch.core.module") == "LightningModule"
     ):
         new_model = _pt_efficiency_model(
-            model, attach_to, exclude, method, storage_path
+            model, attach_to, exclude, method, storage_path, memory_device
         )
 
     return new_model

@@ -53,6 +53,7 @@ class AbstractStateCapture(abc.ABC):
     """
 
     capture_on: bool = True
+    memory_device: Union[str, int]
     _chunk_size: int = 0
     _state_shape: Tuple
     _entropy: Optional[float] = None
@@ -61,6 +62,7 @@ class AbstractStateCapture(abc.ABC):
     @property
     def state_count(self):
         """Total number of observed states, including repeats."""
+        self._executor.submit(self._collect_cache())
         self._wait_for_threads()
         return self._state_count
 
@@ -71,6 +73,7 @@ class AbstractStateCapture(abc.ABC):
     @property
     def states(self):
         """Decompressed state data."""
+        self._executor.submit(self._collect_cache())
         self._wait_for_threads()
         if not isinstance(self._states, np.ndarray):
             self._states = ts.decompress_states(
@@ -104,16 +107,22 @@ class AbstractStateCapture(abc.ABC):
     _threads: List[Future] = []
     _zarr_path = None
     _channel_index = -1
+    _state_cache = None
+    _state_cache_index = 0
 
-    def __init__(self, name, disk_path=None, **kwargs):
+    def __init__(
+        self, name, disk_path=None, memory_device: Union[str, int] = "cpu", **kwargs
+    ):
         """Abstract State Capture Layer.
 
         Args:
-            name (string): Name of the state capture layer.
-            disk_path ([imglib.Path,str], optional): Path on disk to save captured
-                states in zarr format.
+            name: Name of the state capture layer.
+            disk_path: Path on disk to save captured states in zarr format.
                 Defaults to None.
-
+            memory_device: This should be either "cpu" or "gpu". When this is
+                set to "gpu", cupy is installed, and the model is running on a
+                gpu, then this will store a cache of data on the gpu where the
+                states are being collected.
             **kwargs: Keyword arguments. Used for passing arguments to other
                 classes that inerit from AbstractStateCapture.
         """
@@ -137,18 +146,25 @@ class AbstractStateCapture(abc.ABC):
             self._zarr_path = self._zarr_path.joinpath(name + ".zarr")
             self._zarr_path.mkdir(exist_ok=False)
 
+        if not has_cupy and memory_device == "gpu":
+            logger.warning(
+                "Memory device set to gpu, but cupy is not installed. "
+                + "Changing memory device to cpu."
+            )
+            self.memory_device = "cpu"
+        else:
+            self.memory_device = memory_device
+        logger.debug(f"StateCaptureHook: memory_device={self.memory_device}")
+
     def _wait_for_threads(self):
         wait(self._threads)
+        for thread in self._threads:
+            thread.result()
         self._threads = []
 
     def _compress_and_store(self, inputs):
         # Calculate the number of states to process
         num_states = int(np.prod(inputs.shape[0:-1]))
-
-        # Resize the zarr array if needed
-        if 2 * num_states + self._state_count >= self._raw_states.shape[0]:
-            self._state_shape[0] += self._chunk_size[0]
-            self._raw_states.resize(self._state_shape)
 
         # Resize the array using the appropriate library
         if has_cupy and isinstance(inputs, cupy.ndarray):
@@ -162,9 +178,34 @@ class AbstractStateCapture(abc.ABC):
         states = ts.compress_states(states)
 
         # If using cupy array, cast back to numpy
+        if self.memory_device != "cpu" and isinstance(states, cupy.ndarray):
+            if self._state_cache_index + states.shape[0] > self._state_cache.shape[0]:
+                logger.debug(
+                    "_compress_and_store: GPU cache full, collecting and "
+                    + "sending to main memory."
+                )
+                if self._state_cache_index > 0:
+                    states = cupy.vstack(
+                        (self._state_cache[: self._state_cache_index], states)
+                    )
+                num_states += self._state_cache_index
+                self._state_cache_index = 0
+            else:
+                logger.debug("_compress_and_store: Caching states on GPU.")
+                self._state_cache[
+                    self._state_cache_index : self._state_cache_index + states.shape[0]
+                ] = states
+                self._state_cache_index += states.shape[0]
+                return True
+
         if has_cupy and isinstance(states, cupy.ndarray):
             logger.debug("_compress_and_store: cupy -> numpy")
             states = states.get()
+
+        # Resize the zarr array if needed
+        if 2 * num_states + self._state_count >= self._raw_states.shape[0]:
+            self._state_shape[0] += max(self._chunk_size[0], 2 * num_states)
+            self._raw_states.resize(self._state_shape)
 
         # Store numpy array
         logger.debug("_compress_and_store: zarr storage")
@@ -173,6 +214,32 @@ class AbstractStateCapture(abc.ABC):
 
         # Reset the _counts and _state_ids so they are recalculated
         logger.debug("_compress_and_store: reset bins")
+        self._counts = None
+        self._state_ids = None
+        self._states = None
+
+        return True
+
+    def _collect_cache(self):
+        logger.debug("_collect_cache: cupy -> numpy")
+        if self._state_cache_index == 0 or self._state_cache is None:
+            return True
+
+        num_states = self._state_cache_index
+        states = self._state_cache[:num_states].get()
+
+        # Resize the zarr array if needed
+        if 2 * num_states + self._state_count >= self._raw_states.shape[0]:
+            self._state_shape[0] += self._chunk_size[0]
+            self._raw_states.resize(self._state_shape)
+
+        # Store numpy array
+        logger.debug("_collect_cache: zarr storage")
+        self._raw_states[self._state_count : self._state_count + num_states] = states
+        self._state_count += num_states
+
+        # Reset the _counts and _state_ids so they are recalculated
+        logger.debug("_collect_cache: reset bins")
         self._counts = None
         self._state_ids = None
         self._states = None
@@ -225,10 +292,9 @@ class AbstractStateCapture(abc.ABC):
 
         if self._input_shape is None:
             raise ValueError(
-                "The input_shape is None, and no previous input "
-                + "shape information was provided. The first time "
-                + "reset_states is called, an input_shape must be "
-                + "provided."
+                "The input_shape is None, and no previous input shape "
+                + "information was provided. The first time reset_states is "
+                + "called, an input_shape must be provided."
             )
 
         # Try to keep chunks limited to 16MB
@@ -271,6 +337,19 @@ class AbstractStateCapture(abc.ABC):
                     synchronizer=zarr.ThreadSynchronizer(),
                 )
 
+        if (
+            self.memory_device != "cpu"
+            and input_shape is not None
+            and input_shape[0] < self._chunk_size[0]
+        ):
+            if self._state_cache is None:
+                device = (
+                    self.memory_device if isinstance(self.memory_device, int) else 0
+                )
+                with cupy.cuda.Device(device):
+                    self._state_cache = cupy.zeros(self._chunk_size, dtype=cupy.uint8)
+            self._state_cache_index = 0
+
     def state_ids(self):
         r"""Identity of observed states.
 
@@ -288,7 +367,7 @@ class AbstractStateCapture(abc.ABC):
         NOTE: Only observed states are contained in the list.
 
         Returns:
-            [list of Bytes]: Unique states observed by the layer
+            Unique states observed by the layer
         """
         if not isinstance(self._state_ids, list):
             self.counts()
@@ -313,8 +392,8 @@ class AbstractStateCapture(abc.ABC):
         will be >0
 
         Args:
-            index: Indices of instances to retrieve state counts for. If ``None``, then
-                all counts are returned. Defaults to ``None``.
+            index: Indices of instances to retrieve state counts for. If
+                ``None``, then all counts are returned. Defaults to ``None``.
 
         Returns:
             Counts of stat occurences
@@ -412,7 +491,7 @@ try:
         network.
         """
 
-        def __init__(self, name, disk_path=None, **kwargs):
+        def __init__(self, name, disk_path=None, memory_device="cpu", **kwargs):
             """Initialize a state capture layer.
 
             Args:
@@ -423,7 +502,9 @@ try:
             """
             # Use both parent class initializers
             keras.layers.Layer.__init__(self, name=name, **kwargs)
-            AbstractStateCapture.__init__(self, name, disk_path=disk_path, **kwargs)
+            AbstractStateCapture.__init__(
+                self, name, disk_path=disk_path, memory_device=memory_device, **kwargs
+            )
 
         def call(self, inputs):
             """Process layer states.
@@ -482,7 +563,7 @@ except ModuleNotFoundError:
 
 
 try:
-    pass
+    import torch
 
     class StateCaptureHook(AbstractStateCapture):
         """StateCapture hook for PyTorch.
@@ -492,15 +573,18 @@ try:
 
         """
 
-        def __init__(self, name, disk_path=None, **kwargs):  # noqa: D107
+        def __init__(  # noqa: D107
+            self, name, disk_path=None, memory_device="cpu", **kwargs
+        ):
             # Use both parent class initializers
-            super().__init__(name, disk_path, **kwargs)
+            super().__init__(name, disk_path, memory_device=memory_device, **kwargs)
 
             self._channel_index = 1
 
-        def _thread(self, tensor):
+        def _thread(self, tensor: torch.Tensor):
             if has_cupy and tensor.device.type == "cuda":
-                tensor = cupy.asarray(tensor)
+                with cupy.cuda.Device(tensor.device.index):
+                    tensor = cupy.asarray(tensor)
             else:
                 tensor = (tensor > 0).cpu().numpy()
             self._compress_and_store(tensor)
