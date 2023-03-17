@@ -16,6 +16,54 @@ logger = logging.getLogger("TensorState")
 logger.setLevel(logging.WARNING)
 
 
+def zero_info(states):
+    """Get index of zero information neurons.
+
+    This function evaluates state space to find zero information neurons, or
+    groups of neurons that fire in perfect sync. When two neurons fire in
+    perfect sync, the neurons can effectively be thought of as a single
+    neuron for the purposes of calculating entropy.
+
+    In addition to neurons that fire in perfect sync, there are two special
+    cases of neurons not contributing to entropy: always on and always off
+    neurons.
+
+    Args:
+        states: An array of unique states.
+
+    Returns:
+        A list of lists, where each element in the list is a list of neurons
+            that form a group of zero information neurons. There will always be
+            at least two elements to the list: always off and always on. If
+            there are no always off or always on neurons, the lists will be
+            empty.
+    """
+    # Find the correlation between neurons
+    corr = np.corrcoef(states.T)
+
+    # Find off and on neurons
+    off_neurons = np.argwhere(np.isnan(corr).all(axis=0) & ~states[0]).flatten()
+    on_neurons = np.argwhere(np.isnan(corr).all(axis=0) & states[0]).flatten()
+
+    # Make the threshold slightly less than one to account for delta issues
+    threshold = 1.0 - 1.0 / states.shape[0] ** 2
+    adjacency = np.abs(corr) >= threshold
+
+    indices = np.argwhere(adjacency.any(axis=0)).flatten()
+
+    corr_neurons = [off_neurons.tolist(), on_neurons.tolist()]
+
+    # Build a list of zero information neuron groups
+    while indices.size > 0:
+        corr_neurons.append(np.argwhere(adjacency[indices[0]]).flatten().tolist())
+        adjacency[corr_neurons[-1]] = False
+        if len(corr_neurons[-1]) == 1:
+            corr_neurons.pop()
+        indices = np.argwhere(adjacency.any(axis=1)).flatten()
+
+    return corr_neurons
+
+
 def network_efficiency(efficiencies):
     """Calculate the network efficiency.
 
@@ -23,7 +71,8 @@ def network_efficiency(efficiencies):
     geometric mean of the efficiency values calculated for the network.
 
     Args:
-        efficiencies: A list of efficiency values (floats) or a ``keras.Model``
+        efficiencies: A list of efficiency values (floats), a ``keras.Model``,
+            or a PyTorch/Lightning module.
 
     Returns:
         The network efficiency
