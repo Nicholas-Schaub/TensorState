@@ -37,10 +37,12 @@ torch_models = [
     pytest.param(
         (torchvision.models.convnext_base, "CNBlock"),
         marks=pytest.mark.all_models,
+        id="ConvNext",
     ),
     pytest.param(
         (torchvision.models.densenet121, "_DenseBlock"),
         marks=pytest.mark.all_models,
+        id="DenseNet121",
     ),
 ]
 

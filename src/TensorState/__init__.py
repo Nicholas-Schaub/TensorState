@@ -37,6 +37,7 @@ except ModuleNotFoundError:
 
 logger.info(f"has_tf: {has_tf}")
 
+from .Dependency import ElementNode, ModuleGraph, OpNode  # noqa
 from .Layers import StateCapture, StateCaptureHook  # noqa
 from .models import LeNet_5, mobilenet_v2  # noqa
 from .States import compress_states, decompress_states, sort_states  # noqa
