@@ -30,9 +30,9 @@ examples = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Nicholas-Schaub/tensorstate"
-Documentation = "https://tensorstate.readthedocs.io/en/latest/"
-Issues = "https://github.com/Nicholas-Schaub/tensorstate/issues"
+Homepage = "https://github.com/Nicholas-Schaub/TensorState"
+Documentation = "https://nicholas-schaub.github.io/TensorState/"
+Issues = "https://github.com/Nicholas-Schaub/TensorState/issues"
 
 [dependency-groups]
 dev = [
@@ -48,6 +48,10 @@ dev = [
     "pytest-xdist>=3.5",
     "pytest-cov>=5.0",
     "nox>=2024.4",
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.25",
+    "mkdocs-section-index>=0.3",
 ]
 
 [build-system]

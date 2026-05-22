@@ -1,0 +1,90 @@
+site_name: TensorState
+site_description: Neural network state-space analysis and entropy/efficiency tooling.
+site_url: https://nicholas-schaub.github.io/TensorState/
+repo_url: https://github.com/Nicholas-Schaub/TensorState
+repo_name: Nicholas-Schaub/TensorState
+edit_uri: edit/master/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - section-index
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_object_full_path: false
+            show_category_heading: true
+            separate_signature: true
+            show_signature_annotations: true
+            merge_init_into_class: true
+            members_order: source
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Installation: installation.md
+  - State Space: state-space.md
+  - Tutorials:
+      - tutorials/index.md
+      - PyTorch LeNet-5: tutorials/pt-lenet5.md
+  - API Reference:
+      - reference/index.md
+      - Layers: reference/layers.md
+      - States: reference/states.md
+      - TensorState: reference/tensorstate.md
+      - Dependency: reference/dependency.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/Nicholas-Schaub/TensorState
