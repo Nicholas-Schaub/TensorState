@@ -67,7 +67,7 @@ def test_capture_layers(model, data, device):
             else:
                 stack.extend([list(i) for i in s])
 
-        group.apoptosis(idxs=idxs)
+        group.destroy(idxs=idxs)
 
         # if index == 5:
         print(f"idxs: {idxs}")
