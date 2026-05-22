@@ -118,8 +118,8 @@ def epoch_func(x, y, train=False):
 
 efficiencies = []
 early_stop_epoch = 0
-eff_model = Path(".").joinpath("EffLeNet5.ptm")
-acc_model = Path(".").joinpath("AccLeNet5.ptm")
+eff_model = Path().joinpath("EffLeNet5.ptm")
+acc_model = Path().joinpath("AccLeNet5.ptm")
 eff_stop_epoch = 0
 for epoch in range(num_epochs):
     start = time.time()

@@ -3,7 +3,7 @@ name: Build manylinux wheels, upload to PyPI upon release
 # Update on when VERSION changes
 on:
   push:
-    branches:    
+    branches:
       - master
       - dev
   release:

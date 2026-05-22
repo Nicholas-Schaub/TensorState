@@ -1,4 +1,3 @@
-# noqa
 try:
     import torch  # noqa
     import torchvision  # noqa

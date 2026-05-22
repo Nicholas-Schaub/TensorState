@@ -11,8 +11,8 @@ Created branch `integration/v0.5.0-dev` from `origin/master` (v0.4.0,
 `2dc4e01`) and merged three unmerged feature branches in order:
 
 1. `origin/dev` (GPU state caching)
-2. `origin/feat/zero_info` (zero-information neuron detector)
-3. `origin/feat/dependency` (dependency-graph-based pruning infrastructure)
+1. `origin/feat/zero_info` (zero-information neuron detector)
+1. `origin/feat/dependency` (dependency-graph-based pruning infrastructure)
 
 **All three merges completed cleanly with zero conflicts.** Git's `ort`
 strategy auto-merged `TensorState.py` for the dev+zero_info combination
@@ -20,11 +20,11 @@ since their textual changes did not overlap.
 
 ## Merge order rationale
 
-| Order | Branch | Why this position |
-|---|---|---|
-| 1 | `dev` | Foundational — modifies core infrastructure (`Layers.py`, `TensorState.py`). Other branches likely build on it. |
-| 2 | `feat/zero_info` | Small purely-additive change (~50 lines, single new function). Easy to verify in isolation. |
-| 3 | `feat/dependency` | Largest addition (~840 lines added, new external deps). Goes last so the smaller merges are already settled. |
+| Order | Branch            | Why this position                                                                                               |
+| ----- | ----------------- | --------------------------------------------------------------------------------------------------------------- |
+| 1     | `dev`             | Foundational — modifies core infrastructure (`Layers.py`, `TensorState.py`). Other branches likely build on it. |
+| 2     | `feat/zero_info`  | Small purely-additive change (~50 lines, single new function). Easy to verify in isolation.                     |
+| 3     | `feat/dependency` | Largest addition (~840 lines added, new external deps). Goes last so the smaller merges are already settled.    |
 
 ## Per-merge details
 
@@ -33,6 +33,7 @@ since their textual changes did not overlap.
 **Commit on integration branch:** `2da1ae3`
 
 **Files touched:**
+
 - `.pre-commit-config.yaml`: trivial (`files: src` → `files: src/`)
 - `examples/PT_MobileNetV2_Tune.py`: updated to use new `memory_device="gpu"` parameter; uses ThreadPoolExecutor for entropy aggregation; reworked AccuracyCallback hooks for proper capture-on/capture-off semantics
 - `src/TensorState/Layers.py`: +132 lines. Adds `memory_device` parameter (default "cpu"), `_state_cache` GPU buffer, `_collect_cache` method that batches GPU-side states before transferring to main memory. New behavior: `state_count` and `states` property getters call `_collect_cache` before returning
@@ -47,6 +48,7 @@ since their textual changes did not overlap.
 **Commit on integration branch:** `0c1fa4c`
 
 **Files touched:**
+
 - `src/TensorState/TensorState.py`: +51 lines. New `zero_info()` function (lines 20-66 in the integrated file). Detects three categories: always-off neurons, always-on neurons, and groups of perfectly-synchronized neurons. Also adjusts the `network_efficiency()` docstring to mention PyTorch/Lightning support.
 
 **Conflicts:** None. Git auto-merged `TensorState.py` because dev's changes (logger line + efficiency builder signatures) did not overlap with feat/zero_info's changes (new function + docstring).
@@ -58,6 +60,7 @@ since their textual changes did not overlap.
 **Commit on integration branch:** `bb3824b`
 
 **Files touched:**
+
 - `pyproject.toml`: adds `grandalf = "^0.8"` and `pydantic = "^1.10.7"` to runtime deps
 - `poetry.lock`: regenerated for the new deps
 - `src/TensorState/__init__.py`: exports `ElementNode`, `ModuleGraph`, `OpNode` from `Dependency`

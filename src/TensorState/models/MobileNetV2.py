@@ -48,7 +48,7 @@ def mobilenet_v2(num_classes=1000, **kwargs):
             m.append(new_layer)
 
     if num_classes != 1000:
-        dropout = 0.2 if "dropout" not in kwargs else kwargs["dropout"]
+        dropout = kwargs.get("dropout", 0.2)
         linear = torch.nn.Linear(model.last_channel, num_classes)
         torch.nn.init.normal_(linear.weight, 0, 0.01)
         torch.nn.init.zeros_(linear.bias)

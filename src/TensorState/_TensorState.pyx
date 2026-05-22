@@ -166,7 +166,7 @@ cdef long long __lex_sort(unsigned char [:,:] states,
 cpdef _lex_sort(unsigned char [:,:] states,
                 long long state_count):
 
-    cdef np.ndarray index = np.arange(state_count,dtype=np.int64)
+    cdef np.ndarray index = np.arrange(state_count,dtype=np.int64)
     cdef np.ndarray bin_edges = np.zeros(state_count+1,dtype=np.int64)
     cdef long long count = 1
 

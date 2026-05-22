@@ -79,7 +79,7 @@ class LeNet5(nn.Module):
 model = LeNet5().to(dev)
 
 """ Train the model, or load model if it already exists """
-model_path = Path(".").joinpath("LeNet5")
+model_path = Path().joinpath("LeNet5")
 
 num_epochs = 200
 loss_func = nn.CrossEntropyLoss()
@@ -127,15 +127,7 @@ if not model_path.exists():
         valid_accuracy = np.sum(np.multiply(accuracies, nums)) / np.sum(nums)
 
         print(
-            "Epoch {}/{} ({:.2f}s): TrainLoss={:.4f}, TrainAccuracy={:.2f}%, ValidLoss={:.4f}, ValidAccuracy={:.2f}%".format(
-                str(epoch + 1).zfill(3),
-                num_epochs,
-                time.time() - start,
-                train_loss,
-                100 * train_accuracy,
-                valid_loss,
-                100 * valid_accuracy,
-            )
+            f"Epoch {str(epoch + 1).zfill(3)}/{num_epochs} ({time.time() - start:.2f}s): TrainLoss={train_loss:.4f}, TrainAccuracy={100 * train_accuracy:.2f}%, ValidLoss={valid_loss:.4f}, ValidAccuracy={100 * valid_accuracy:.2f}%"
         )
 
         # Early stopping criteria
@@ -167,7 +159,7 @@ state_dict = {}
 for c in range(10):
     print()
     print(f"** Class {c} **")
-    ind = np.argwhere(Y == c).squeeze()
+    ind = np.argwhere(c == Y).squeeze()
     print(f"# samples: {ind.size}")
 
     class_dl = DataLoader(valid_ds, batch_size=200)
@@ -191,9 +183,7 @@ for c in range(10):
             for state_id, count in zip(layer.state_ids(), layer.counts())
         }
         print(
-            "Got {} state ids for layer {} in {:.3f}s...".format(
-                len(class_dict[layer.name]), layer.name, time.time() - start
-            )
+            f"Got {len(class_dict[layer.name])} state ids for layer {layer.name} in {time.time() - start:.3f}s..."
         )
 
     state_dict[c] = class_dict

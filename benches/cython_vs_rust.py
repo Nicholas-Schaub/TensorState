@@ -14,8 +14,8 @@ Usage::
     uv run python benches/cython_vs_rust.py
 """
 
-import time
 import sys
+import time
 
 import numpy as np
 
@@ -66,7 +66,9 @@ def validate_compress_pi8() -> bool:
             cy = cython_ts._compress_tensor_pi8(a)
             rs = rust_ts._compress_tensor_pi8(a)
             if not np.array_equal(cy, rs):
-                print(f"  MISMATCH _compress_tensor_pi8 n_rows={n_rows} n_cols={n_cols}")
+                print(
+                    f"  MISMATCH _compress_tensor_pi8 n_rows={n_rows} n_cols={n_cols}"
+                )
                 ok = False
     return ok
 
@@ -117,18 +119,14 @@ def benchmark() -> None:
     n_rows = 10000
     rng = np.random.default_rng(46)
 
-    print(
-        f"{'cols':>6}  {'Cython AVX':>14}  {'Rust scalar':>14}  {'Rust/Cython':>14}"
-    )
+    print(f"{'cols':>6}  {'Cython AVX':>14}  {'Rust scalar':>14}  {'Rust/Cython':>14}")
     print("-" * 60)
     for n_cols in sizes:
         a = (rng.random((n_rows, n_cols)) - 0.5).astype(np.float32)
         t_cy = bench(cython_ts._compress_tensor_ps, a)
         t_rs = bench(rust_ts._compress_tensor_ps, a)
         ratio = t_rs / t_cy
-        print(
-            f"{n_cols:>6}  {t_cy:>10.2f} ms  {t_rs:>10.2f} ms  {ratio:>10.2f}x"
-        )
+        print(f"{n_cols:>6}  {t_cy:>10.2f} ms  {t_rs:>10.2f} ms  {ratio:>10.2f}x")
 
 
 def main() -> int:

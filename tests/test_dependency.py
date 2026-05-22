@@ -28,9 +28,9 @@ def test_linked_neurons():
 
 # @pytest.mark.skip()
 def test_capture_layers(model, data, device):
-    train, test = data
+    _train, test = data
 
-    model_gen, layer = model
+    model_gen, _layer = model
     m = model_gen(num_classes=len(test.dataset.classes))
 
     m.to(device)
@@ -39,8 +39,8 @@ def test_capture_layers(model, data, device):
     graph = Dependency.ModuleGraph(m)
 
     # Sanity test
-    for x, y in test:
-        z = m(x.to(device))
+    for x, _y in test:
+        m(x.to(device))
 
         break
 
@@ -50,7 +50,7 @@ def test_capture_layers(model, data, device):
         # if index == 5:
         print(f"group: {index}")
         print("Before")
-        for connectivity, vertex in zip(group.M(), group.V()):
+        for connectivity, vertex in zip(group.M(), group.V(), strict=False):
             print(vertex)
             print(connectivity)
             # print(graph.groups[0].V())
@@ -63,7 +63,7 @@ def test_capture_layers(model, data, device):
             if isinstance(s, int):
                 idxs.append(s)
             elif isinstance(s[0], int):
-                idxs.extend([i for i in s])
+                idxs.extend(list(s))
             else:
                 stack.extend([list(i) for i in s])
 
@@ -78,7 +78,7 @@ def test_capture_layers(model, data, device):
         print()
 
     # Test modified network
-    for x, y in test:
-        z = m(x.to(device))
+    for x, _y in test:
+        m(x.to(device))
 
         break

@@ -162,17 +162,7 @@ for epoch in range(num_epochs):
     ve = time.time() - ve_start
 
     print(
-        "Epoch {}/{} ({:.2f}s,{:.2f}s,{:.2f}s): TrainLoss={:.4f}, TrainAccuracy={:.2f}%, ValidLoss={:.4f}, ValidAccuracy={:.2f}%".format(
-            str(epoch + 1).zfill(3),
-            num_epochs,
-            time.time() - start,
-            te,
-            ve,
-            train_loss,
-            100 * train_accuracy,
-            valid_loss,
-            100 * valid_accuracy,
-        )
+        f"Epoch {str(epoch + 1).zfill(3)}/{num_epochs} ({time.time() - start:.2f}s,{te:.2f}s,{ve:.2f}s): TrainLoss={train_loss:.4f}, TrainAccuracy={100 * train_accuracy:.2f}%, ValidLoss={valid_loss:.4f}, ValidAccuracy={100 * valid_accuracy:.2f}%"
     )
 
     # Early stopping criteria

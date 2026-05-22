@@ -9,12 +9,10 @@ import numpy as np
 import pytest
 import torch
 
-from TensorState import Dependency
 from TensorState.Dependency import (
     ApoptosisType,
     BatchNormNode,
     ConvNode,
-    Dependency as _Dep,
     GroupNormNode,
     LayerNormNode,
     LinearNode,
@@ -23,7 +21,6 @@ from TensorState.Dependency import (
     zero_info_groups,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -31,11 +28,6 @@ from TensorState.Dependency import (
 
 def _fake_module_data(module: torch.nn.Module) -> ModuleData:
     """Build a ModuleData carrier with a dummy grad_fn so a node can wrap it."""
-    x = torch.randn(1, module.in_channels if hasattr(module, "in_channels") else
-                    module.in_features if hasattr(module, "in_features") else
-                    module.num_features if hasattr(module, "num_features") else
-                    module.num_channels if hasattr(module, "num_channels") else 8,
-                    requires_grad=False)
     # Use a real grad_fn from a small operation so the BaseModel validator
     # is happy. The graph traversal path is not exercised in these unit tests.
     y = (torch.ones(1, requires_grad=True) * 2).clone()
@@ -53,8 +45,8 @@ def test_zero_info_groups_separates_always_on_off_and_synced():
     states = rng.choice([True, False], size=(N, 12), p=[0.5, 0.5])
     states[:, 0] = False  # always off
     states[:, 1] = False  # always off
-    states[:, 2] = True   # always on
-    states[:, 3] = True   # always on
+    states[:, 2] = True  # always on
+    states[:, 3] = True  # always on
     states[:, 5] = states[:, 4]  # synced pair
 
     groups = zero_info_groups(states)
@@ -97,7 +89,9 @@ def test_linear_merge_outputs_averages_weights():
     redundant = node.merge_outputs(groups=[[0, 1, 2]])
 
     # Output index 0 (the survivor) should equal the mean of rows 0, 1, 2
-    expected_weight_0 = torch.arange(32, dtype=torch.float32).reshape(8, 4)[[0, 1, 2]].mean(dim=0)
+    expected_weight_0 = (
+        torch.arange(32, dtype=torch.float32).reshape(8, 4)[[0, 1, 2]].mean(dim=0)
+    )
     assert torch.allclose(layer.weight.data[0], expected_weight_0)
 
     expected_bias_0 = torch.tensor([0.0, 1.0, 2.0]).mean()
@@ -125,7 +119,7 @@ def test_linear_destroy_outputs_removes_rows():
     layer = torch.nn.Linear(4, 8)
     original = layer.weight.data.clone()
     node = LinearNode(_fake_module_data(layer))
-    keep, idxs = node.destroy_outputs([1, 3, 5])
+    keep, _idxs = node.destroy_outputs([1, 3, 5])
     assert keep == [0, 2, 4, 6, 7]
     assert layer.weight.shape == (5, 4)
     assert layer.out_features == 5
@@ -157,7 +151,9 @@ def test_conv_merge_outputs_averages_4d_weight():
 
     expected = original[[2, 4, 7]].mean(dim=0)
     assert torch.allclose(layer.weight.data[2], expected)
-    assert layer.bias.data[2].item() == pytest.approx(original_bias[[2, 4, 7]].mean().item())
+    assert layer.bias.data[2].item() == pytest.approx(
+        original_bias[[2, 4, 7]].mean().item()
+    )
     assert redundant == [4, 7]
 
 
@@ -187,8 +183,8 @@ def test_batchnorm_merge_outputs_averages_all_four():
     node = BatchNormNode(_fake_module_data(bn))
     redundant = node.merge_outputs(groups=[[1, 3, 5]])
 
-    assert bn.weight.data[1].item() == pytest.approx(3.0)        # mean of 1, 3, 5
-    assert bn.bias.data[1].item() == pytest.approx(6.0)          # mean of 2, 6, 10
+    assert bn.weight.data[1].item() == pytest.approx(3.0)  # mean of 1, 3, 5
+    assert bn.bias.data[1].item() == pytest.approx(6.0)  # mean of 2, 6, 10
     assert bn.running_mean.data[1].item() == pytest.approx(9.0)  # mean of 3, 9, 15
     assert redundant == [3, 5]
 
@@ -237,8 +233,8 @@ def test_layernorm_merge_outputs_averages_affine():
     node = LayerNormNode(_fake_module_data(ln))
     node.merge_outputs(groups=[[2, 4, 6]])
 
-    assert ln.weight.data[2].item() == pytest.approx(4.0)   # mean of 2, 4, 6
-    assert ln.bias.data[2].item() == pytest.approx(40.0)    # mean of 20, 40, 60
+    assert ln.weight.data[2].item() == pytest.approx(4.0)  # mean of 2, 4, 6
+    assert ln.bias.data[2].item() == pytest.approx(40.0)  # mean of 20, 40, 60
 
 
 def test_layernorm_destroy_outputs():
@@ -246,8 +242,11 @@ def test_layernorm_destroy_outputs():
     node = LayerNormNode(_fake_module_data(ln))
     node.destroy_outputs([0, 1])
     # normalized_shape becomes a tuple of len 1 with the new size, or an int.
-    new_shape = ln.normalized_shape if isinstance(ln.normalized_shape, int) \
+    new_shape = (
+        ln.normalized_shape
+        if isinstance(ln.normalized_shape, int)
         else ln.normalized_shape[0]
+    )
     assert new_shape == 6
     assert ln.weight.shape == (6,)
 

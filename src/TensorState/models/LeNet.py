@@ -1,5 +1,4 @@
 import logging
-from typing import List, Tuple, Union
 
 import torch
 import torchvision
@@ -7,17 +6,18 @@ import torchvision
 logger = logging.getLogger(__name__)
 
 
-class LeNet_5(torch.nn.Module):
+class LeNet_5(torch.nn.Module):  # noqa: N801 -- canonical model name
     """LeNet 5 model."""
 
     def __init__(
         self,
-        layers: Union[
-            int,
-            Tuple[Union[int, List[int]], Union[int, List[int]], Union[int, List[int]]],
-        ] = (64, 64, 64),
-        batch_norm=True,
-        residual=False,
+        layers: int | tuple[int | list[int], int | list[int], int | list[int]] = (
+            64,
+            64,
+            64,
+        ),
+        batch_norm=True,  # noqa: FBT002
+        residual=False,  # noqa: FBT002
         num_classes=10,
     ):
         """Initialize LeNet 5 model.
@@ -43,7 +43,7 @@ class LeNet_5(torch.nn.Module):
         if isinstance(layers, tuple):
             assert len(layers) == 3
 
-            new_layers: List[List[int]] = []
+            new_layers: list[list[int]] = []
             for layer in layers:
                 if isinstance(layer, int):
                     new_layers.append([layer])
@@ -56,7 +56,7 @@ class LeNet_5(torch.nn.Module):
             assert isinstance(layers, int)
             tuple_layers = ([layers],) * 3
 
-        blocks: List[torchvision.ops.Conv2dNormActivation] = []
+        blocks: list[torchvision.ops.Conv2dNormActivation] = []
         in_chan = 3
         for nl, layer in enumerate(tuple_layers):
             for nn, num_neurons in enumerate(layer):
@@ -95,7 +95,7 @@ class LeNet_5(torch.nn.Module):
                 torch.nn.init.kaiming_normal_(m.weight)
                 torch.nn.init.zeros_(m.bias)
 
-    def forward(self, x):  # noqa
+    def forward(self, x):
         if self.use_res_connect:
             for n, layer in enumerate(self.features):
                 if n == 1:
@@ -107,7 +107,4 @@ class LeNet_5(torch.nn.Module):
             x = self.features(x)
 
         x = torch.nn.functional.adaptive_avg_pool2d(x, (1, 1))
-
-        x = self.classifier(x)
-
-        return x
+        return self.classifier(x)

@@ -7,7 +7,7 @@ import torchvision
 import torchvision.datasets as datasets
 from torchvision.transforms import Compose, Resize, ToTensor
 
-import TensorState as ts
+import TensorState as ts  # noqa: N813 -- deliberate package alias
 
 torch_data = [
     "MNIST",
@@ -103,7 +103,6 @@ def data(request):
 
 
 @pytest.fixture(
-    scope="function",
     params=[
         pytest.param("cuda", marks=pytest.mark.use_gpu),
         pytest.param("cpu", marks=pytest.mark.use_cpu),
@@ -113,12 +112,12 @@ def device(request):
     return request.param
 
 
-@pytest.fixture(scope="function", params=[True, False])
+@pytest.fixture(params=[True, False])
 def capture_states(request):
     return request.param
 
 
-@pytest.fixture(scope="function", params=torch_models)
+@pytest.fixture(params=torch_models)
 def model(request):
     model, layer = request.param
 

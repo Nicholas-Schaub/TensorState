@@ -11,7 +11,6 @@ import numpy
 from Cython.Build import cythonize
 from setuptools import setup
 
-
 os.environ.setdefault("CFLAGS", "-march=haswell -O3")
 os.environ.setdefault("CXXFLAGS", "-march=haswell -O3")
 

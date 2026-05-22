@@ -1,0 +1,52 @@
+[files]
+extend-exclude = [
+    "*.lock",
+    "uv.lock",
+    "Cargo.lock",
+    ".venv/",
+    "target/",
+    "site/",
+    "*.cpp",
+    "*.so",
+    "*.html",
+    "crates/tensorstate-core/src/arch/**",
+]
+
+[default.extend-words]
+# Project-specific technical terms
+tensorstate = "tensorstate"
+TensorState = "TensorState"
+microstate = "microstate"
+microstates = "microstates"
+aIQ = "aIQ"
+apoptose = "apoptose"
+apoptosed = "apoptosed"
+apoptotic = "apoptotic"
+apoptosis = "apoptosis"
+
+# Math / ML jargon
+Bernoulli = "Bernoulli"
+logsumexp = "logsumexp"
+logsigmoid = "logsigmoid"
+softmax = "softmax"
+Shannon = "Shannon"
+Kolmogorov = "Kolmogorov"
+
+# Library names that look like typos
+zarr = "zarr"
+numcodecs = "numcodecs"
+grandalf = "grandalf"
+torchvision = "torchvision"
+cuda = "cuda"
+CuPy = "CuPy"
+cupy = "cupy"
+Cython = "Cython"
+cython = "cython"
+Triton = "Triton"
+
+# Common short-name authors / projects
+HRank = "HRank"
+TissueNet = "TissueNet"
+EVICAN = "EVICAN"
+ZO1 = "ZO1"
+Cellpose = "Cellpose"
