@@ -1,21 +1,23 @@
 """State compression, decompression, and sorting primitives.
 
 The CPU bit-packing and lex-sort routines are implemented in the Cython
-extension ``_TensorState``. The GPU bit-packing path is a small pure-torch
-implementation (no custom CUDA kernel) that uses standard tensor operations
-to pack 8 bits into each uint8 byte.
+extension ``_TensorState``. The GPU bit-packing path is a Triton kernel
+that matches the throughput of the previous CuPy ``ElementwiseKernel``
+while requiring no CuPy dependency (Triton ships with PyTorch). For
+torch tensors on CPU there is a slower fallback using native torch ops.
 
 The previous implementation routed GPU data through CuPy with a custom
-``ElementwiseKernel`` and a CuPy ``lexsort``. CuPy has been removed; the
-GPU path now uses PyTorch tensor ops natively, and CPU sorting always uses
-the Cython ``_lex_sort`` (which is fast enough that round-tripping CPU
-data through GPU just for sorting is not worthwhile).
+``ElementwiseKernel`` and a CuPy ``lexsort``. CuPy has been removed; CPU
+sorting always uses the Cython ``_lex_sort`` (round-tripping CPU data
+through GPU just for sorting is not worthwhile).
 """
 
 import logging
 
 import numpy as np
 import torch
+import triton
+import triton.language as tl
 
 import TensorState._TensorState as _ts
 
@@ -26,33 +28,154 @@ logging.basicConfig(
 logger = logging.getLogger("TensorState.States")
 
 
-def _compress_states_torch(states: torch.Tensor) -> torch.Tensor:
-    """Bit-pack a 2D torch tensor of neuron states into uint8 bytes.
+@triton.jit
+def _packbits_kernel_fused(
+    input_ptr,
+    out_ptr,
+    n_rows,
+    n_cols,
+    out_cols,
+    BLOCK_N: tl.constexpr,
+    BLOCK_B: tl.constexpr,
+):
+    """Pack 8 input values (>0 firing) into each output uint8 byte.
 
-    Neurons fire if their value is > 0. Each contiguous group of 8 neurons
-    along the last dimension is packed into one uint8 byte. If the number of
-    neurons is not a multiple of 8, the final byte is padded with zeros.
+    Fused variant: the thresholding (>0) happens inside the kernel, so
+    the input can be float and no intermediate uint8 tensor is needed.
+    Layout:
+        input  shape (n_rows, n_cols)      float32
+        out    shape (n_rows, out_cols)    uint8
+    """
+    pid_n = tl.program_id(0)
+    pid_b = tl.program_id(1)
+
+    rows = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+    bytes_ = pid_b * BLOCK_B + tl.arange(0, BLOCK_B)
+
+    row_mask = rows < n_rows
+    byte_mask = bytes_ < out_cols
+
+    packed = tl.zeros((BLOCK_N, BLOCK_B), dtype=tl.uint8)
+
+    for j in tl.static_range(8):
+        cols = bytes_[None, :] * 8 + j
+        load_mask = row_mask[:, None] & byte_mask[None, :] & (cols < n_cols)
+        ptrs = input_ptr + rows[:, None] * n_cols + cols
+        vals = tl.load(ptrs, mask=load_mask, other=0.0)
+        bit = (vals > 0).to(tl.uint8)
+        packed = packed | (bit << j)
+
+    out_ptrs = out_ptr + rows[:, None] * out_cols + bytes_[None, :]
+    tl.store(out_ptrs, packed, mask=row_mask[:, None] & byte_mask[None, :])
+
+
+@triton.jit
+def _packbits_kernel(
+    bits_ptr,
+    out_ptr,
+    n_rows,
+    n_cols,
+    out_cols,
+    BLOCK_N: tl.constexpr,
+    BLOCK_B: tl.constexpr,
+):
+    """Pack 8 input bits into each output uint8 byte.
+
+    Layout:
+        bits  shape (n_rows, n_cols)        dtype uint8 (values 0 or 1)
+        out   shape (n_rows, out_cols)      dtype uint8
+
+    The thresholding (>0) is done in PyTorch before this kernel runs. This
+    variant is used when the input is already pre-thresholded uint8 (e.g.,
+    when a caller passes ``(states > 0).to(torch.uint8)`` directly), since
+    1-byte loads are 4x cheaper than 4-byte float loads.
+    """
+    pid_n = tl.program_id(0)
+    pid_b = tl.program_id(1)
+
+    rows = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
+    bytes_ = pid_b * BLOCK_B + tl.arange(0, BLOCK_B)
+
+    row_mask = rows < n_rows
+    byte_mask = bytes_ < out_cols
+
+    packed = tl.zeros((BLOCK_N, BLOCK_B), dtype=tl.uint8)
+
+    for j in tl.static_range(8):
+        cols = bytes_[None, :] * 8 + j
+        load_mask = row_mask[:, None] & byte_mask[None, :] & (cols < n_cols)
+        ptrs = bits_ptr + rows[:, None] * n_cols + cols
+        vals = tl.load(ptrs, mask=load_mask, other=0).to(tl.uint8)
+        packed = packed | (vals << j)
+
+    out_ptrs = out_ptr + rows[:, None] * out_cols + bytes_[None, :]
+    tl.store(out_ptrs, packed, mask=row_mask[:, None] & byte_mask[None, :])
+
+
+def _compress_states_triton(states: torch.Tensor) -> torch.Tensor:
+    """Bit-pack a 2D CUDA torch tensor using a Triton kernel.
+
+    Picks the fused-threshold kernel for float dtypes (avoids an
+    intermediate uint8 tensor) and the pre-thresholded kernel when the
+    input is already uint8 / bool (saves bandwidth).
 
     Args:
-        states: A 2D tensor where rows are state observations and columns
-            are neurons. Any numeric dtype; values > 0 are treated as firing.
+        states: 2D CUDA tensor. Values > 0 are firing.
 
     Returns:
-        A 2D ``torch.uint8`` tensor on the same device as ``states`` with
-        shape ``(N, ceil(C / 8))``.
+        2D uint8 CUDA tensor with shape ``(N, ceil(C / 8))``.
+    """
+    states = states.contiguous()
+    n_rows, n_cols = states.shape
+    out_cols = (n_cols + 7) // 8
+    out = torch.empty((n_rows, out_cols), dtype=torch.uint8, device=states.device)
+
+    BLOCK_N = 16
+    BLOCK_B = 128
+    grid = (triton.cdiv(n_rows, BLOCK_N), triton.cdiv(out_cols, BLOCK_B))
+
+    if states.dtype in (torch.uint8, torch.bool):
+        kernel = _packbits_kernel
+        if states.dtype == torch.bool:
+            states = states.to(torch.uint8)
+    else:
+        kernel = _packbits_kernel_fused
+
+    kernel[grid](
+        states,
+        out,
+        n_rows,
+        n_cols,
+        out_cols,
+        BLOCK_N=BLOCK_N,
+        BLOCK_B=BLOCK_B,
+    )
+    return out
+
+
+def _compress_states_torch_cpu(states: torch.Tensor) -> torch.Tensor:
+    """Bit-pack a CPU torch tensor using native torch ops.
+
+    Used when the input is a torch tensor but on CPU. The Triton path is
+    GPU-only; this is the CPU fallback when a torch tensor happens to be
+    passed in.
     """
     bits = (states > 0).to(torch.uint8)
     n_rows, n_cols = bits.shape
     pad = (-n_cols) % 8
     if pad:
         bits = torch.nn.functional.pad(bits, (0, pad))
-    # Reshape into groups of 8 bits and combine via shift+sum.
-    # For distinct bit positions sum is equivalent to bitwise OR, and uint8
-    # cannot overflow since the per-byte maximum is 255.
     bits = bits.reshape(n_rows, -1, 8)
     shifts = torch.arange(8, dtype=torch.uint8, device=bits.device)
     packed = (bits << shifts).sum(dim=-1).to(torch.uint8)
     return packed
+
+
+def _compress_states_torch(states: torch.Tensor) -> torch.Tensor:
+    """Dispatch to Triton (CUDA) or native torch (CPU) bit-packing."""
+    if states.is_cuda:
+        return _compress_states_triton(states)
+    return _compress_states_torch_cpu(states)
 
 
 def compress_states(states):
