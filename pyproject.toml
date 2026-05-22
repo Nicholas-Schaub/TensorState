@@ -55,14 +55,18 @@ dev = [
 ]
 
 [build-system]
-requires = ["setuptools>=70.0", "Cython>=3.0", "numpy>=1.26"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
 
-[tool.setuptools]
-package-dir = { "" = "src" }
-
-[tool.setuptools.packages.find]
-where = ["src"]
+[tool.maturin]
+# The Rust extension is exposed as `TensorState._TensorState_rs` so it can
+# coexist with the (now-optional) Cython extension `TensorState._TensorState`,
+# which is kept in-tree for regression testing only and built via
+# `scripts/build-cython.sh` on demand.
+module-name = "TensorState._TensorState_rs"
+manifest-path = "crates/tensorstate-core/Cargo.toml"
+python-source = "src"
+features = ["pyo3/extension-module"]
 
 [tool.ruff]
 line-length = 88

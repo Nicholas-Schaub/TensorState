@@ -13,13 +13,30 @@ through GPU just for sorting is not worthwhile).
 """
 
 import logging
+import os
 
 import numpy as np
 import torch
 import triton
 import triton.language as tl
 
-import TensorState._TensorState as _ts
+# CPU-side bit-packing + lex-sort is implemented in a Rust extension by
+# default (TensorState._TensorState_rs). The original Cython extension
+# (TensorState._TensorState) is preserved in-tree for regression testing
+# and selected via the TENSORSTATE_USE_CYTHON=1 environment variable.
+_USE_CYTHON = os.environ.get("TENSORSTATE_USE_CYTHON", "0") == "1"
+if _USE_CYTHON:
+    import TensorState._TensorState as _ts  # type: ignore
+else:
+    try:
+        import TensorState._TensorState_rs as _ts  # type: ignore
+    except ImportError as exc:
+        raise ImportError(
+            "TensorState's Rust extension `_TensorState_rs` is not built. "
+            "Install the package via `uv sync` / `pip install .` to build it, "
+            "or set TENSORSTATE_USE_CYTHON=1 and build the Cython extension "
+            "via `scripts/build-cython.sh` for regression testing."
+        ) from exc
 
 logging.basicConfig(
     format="%(asctime)s - %(name)-10s - %(levelname)-8s - %(message)s",
