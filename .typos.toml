@@ -12,7 +12,19 @@ extend-exclude = [
     "crates/tensorstate-core/src/arch/**",
 ]
 
+[default]
+# typos by default rewrites "Nd" -> "And" which corrupts PyTorch private
+# class refs like `_ConvNd`, `_AdaptiveMaxPoolNd`, etc. Skip the suffix
+# entirely so it cannot fire inside identifiers.
+extend-ignore-identifiers-re = [
+    "_[A-Za-z]+Nd$",
+    "_[A-Za-z]+Nd[A-Z_]",
+]
+
 [default.extend-words]
+# Direct allowlist (defense in depth)
+Nd = "Nd"
+
 # Project-specific technical terms
 tensorstate = "tensorstate"
 TensorState = "TensorState"
