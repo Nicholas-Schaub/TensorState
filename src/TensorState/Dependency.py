@@ -659,8 +659,8 @@ class LayerNormNode(ElementNode):
 
 @ElementNode.register(
     (
-        torch.nn.modules.pooling._AdaptiveMaxPoolAnd,
-        torch.nn.modules.pooling._AdaptiveAvgPoolAnd,
+        torch.nn.modules.pooling._AdaptiveMaxPoolNd,
+        torch.nn.modules.pooling._AdaptiveAvgPoolNd,
     )
 )
 class AdaptivePoolNode(ElementNode):
@@ -690,7 +690,7 @@ class ReshapeNode(ElementNode):
 # =============================================================================
 
 
-@OpNode.register(torch.nn.modules.conv._ConvAnd)
+@OpNode.register(torch.nn.modules.conv._ConvNd)
 class ConvNode(OpNode):
     def __init__(self, data: GradientData | ModuleData):
         super().__init__(data)
@@ -767,7 +767,7 @@ class ConvNode(OpNode):
         return keep_idxs, idxs
 
 
-@ElementNode.register(torch.nn.modules.conv._ConvAnd)
+@ElementNode.register(torch.nn.modules.conv._ConvNd)
 class ConvGroupNode(ElementNode):
     """Depthwise / fully-grouped conv: in_channels == groups."""
 
