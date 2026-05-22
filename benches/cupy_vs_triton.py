@@ -18,11 +18,12 @@ regression / parity checks.
 import time
 
 import numpy as np
-import torch
 
 # Cython reference is the bit-pack gold standard.
 import TensorState._TensorState as cython_ts
-from TensorState import States  # noqa: E402
+import torch
+
+from TensorState import States
 
 try:
     import cupy
@@ -99,7 +100,9 @@ def run_size(n_rows: int, n_cols: int, n_warmup: int = 3, n_reps: int = 10):
         lambda: States.compress_states(a_torch_cuda),
         sync=torch.cuda.synchronize,
     )
-    t_cupy = bench(lambda: cupy_compress(a_cupy), sync=cupy.cuda.runtime.deviceSynchronize)
+    t_cupy = bench(
+        lambda: cupy_compress(a_cupy), sync=cupy.cuda.runtime.deviceSynchronize
+    )
 
     return {
         "n_rows": n_rows,
@@ -140,7 +143,9 @@ def main() -> int:
         )
 
     print("=" * 110)
-    print(f"All sizes tested with {n_rows} rows; 3 warmup + 10 timed runs; mean reported.")
+    print(
+        f"All sizes tested with {n_rows} rows; 3 warmup + 10 timed runs; mean reported."
+    )
     return 0
 
 

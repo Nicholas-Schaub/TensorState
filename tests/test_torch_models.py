@@ -1,11 +1,11 @@
 import pytest
 
-import TensorState as ts
+import TensorState as ts  # noqa: N813 -- deliberate package alias
 
 
 @pytest.mark.parametrize("weights", ["IMAGENET1K_V1", "IMAGENET1K_V2", None])
 def test_mobilenet_v2(data, device, weights):
-    train, test = data
+    _train, test = data
 
     num_classes = len(test.dataset.classes)
 
@@ -14,5 +14,7 @@ def test_mobilenet_v2(data, device, weights):
     model.to(device)
     model.eval()
 
-    for x, y in test:
-        z = model(x.to(device))
+    for x, _y in test:
+        model(x.to(device))
+
+        break

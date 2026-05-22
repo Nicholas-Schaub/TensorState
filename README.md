@@ -28,3 +28,30 @@ pre-requisites for compiling before installing with `pip`.
 ## Documentation
 
 https://tensorstate.readthedocs.io/en/latest/
+
+## Developing
+
+The project uses [uv](https://docs.astral.sh/uv/) for environment management,
+[ruff](https://docs.astral.sh/ruff/) for lint + format,
+[ty](https://docs.astral.sh/ty/) for type checking, and
+[pre-commit](https://pre-commit.com/) to run them on every commit.
+
+```bash
+# install dev dependencies (ruff, ty, pre-commit, pytest, mkdocs, ...)
+uv sync --group dev
+
+# install the git hook so every commit is auto-checked
+uv run pre-commit install
+
+# run all hooks against the whole tree (CI-equivalent)
+uv run pre-commit run --all-files
+```
+
+Individual tools are available via `uv run`:
+
+```bash
+uv run ruff check .         # lint
+uv run ruff format .        # format
+uv run ty check src         # type check
+uv run pytest               # tests
+```

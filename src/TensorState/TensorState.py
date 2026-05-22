@@ -1,6 +1,5 @@
 import logging
 from collections import OrderedDict
-from typing import Union
 
 import numpy as np
 
@@ -78,25 +77,23 @@ def network_efficiency(efficiencies):
     # Extract efficiency values from a model with attached hooks
     if hasattr(efficiencies, "efficiency_layers"):
         efficiencies = [eff.efficiency() for eff in efficiencies.efficiency_layers]
-    assert isinstance(
-        efficiencies, list
-    ), "Input must be a list or a module with attached state-capture hooks"
+    assert isinstance(efficiencies, list), (
+        "Input must be a list or a module with attached state-capture hooks"
+    )
 
     # If the length of efficiencies is 0, return None and warn the user
     if len(efficiencies) == 0:
         logger.warning(
-            "List of efficiency values is empty. Verify input or model input to network_efficiency."
+            "List of efficiency values is empty. Verify input or model "
+            "input to network_efficiency."
         )
         return None
 
-    # Calculate the geometric mean of efficiencies
-    net_efficiency = np.exp(
-        sum(np.log(eff) for eff in efficiencies) / len(efficiencies)
-    )  # geometric mean
-    return net_efficiency
+    # Geometric mean of efficiencies
+    return np.exp(sum(np.log(eff) for eff in efficiencies) / len(efficiencies))
 
 
-def aIQ(net_efficiency, accuracy, weight):
+def aIQ(net_efficiency, accuracy, weight):  # noqa: N802 -- public API: aIQ metric
     """Calculate the artificial intelligence quotient.
 
     The artificial intelligence quotient (aIQ) is a simple metric to report a
@@ -122,8 +119,7 @@ def aIQ(net_efficiency, accuracy, weight):
     """
     if weight <= 0 or not isinstance(weight, int):
         raise ValueError("aIQ weight must be an integer greater than 0.")
-    aIQ = np.power(accuracy**weight * net_efficiency, 1 / (weight + 1))
-    return aIQ
+    return np.power(accuracy**weight * net_efficiency, 1 / (weight + 1))
 
 
 def entropy(counts, alpha=1):
@@ -223,10 +219,10 @@ def _pt_efficiency_model(
 def build_efficiency_model(
     model,
     attach_to,
-    exclude=[],
+    exclude=None,
     method="after",
     storage_path=None,
-    memory_device: Union[str, int] = "cpu",
+    memory_device: str | int = "cpu",
 ):
     """Attach state capture methods to a neural network.
 
@@ -253,10 +249,13 @@ def build_efficiency_model(
     Returns:
         model: The same model with state-capture hooks attached.
     """
+    if exclude is None:
+        exclude = []
     class_module = {cls.__module__: cls.__name__ for cls in model.__class__.__bases__}
 
     # Validate input arguments
-    assert isinstance(attach_to, (list, str)) and len(attach_to) > 0
+    assert isinstance(attach_to, (list, str))
+    assert len(attach_to) > 0
     assert method in [
         "before",
         "after",
@@ -301,7 +300,7 @@ def remove_state_layers(model) -> None:
         del model.state_capture_hooks
         del model.efficiency_layers
 
-    for name, child in model._modules.items():
+    for _name, child in model._modules.items():
         if child is not None:
             if hasattr(child, "_forward_hooks"):
                 child._forward_hooks = OrderedDict()

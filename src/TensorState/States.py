@@ -184,8 +184,7 @@ def _compress_states_torch_cpu(states: torch.Tensor) -> torch.Tensor:
         bits = torch.nn.functional.pad(bits, (0, pad))
     bits = bits.reshape(n_rows, -1, 8)
     shifts = torch.arange(8, dtype=torch.uint8, device=bits.device)
-    packed = (bits << shifts).sum(dim=-1).to(torch.uint8)
-    return packed
+    return (bits << shifts).sum(dim=-1).to(torch.uint8)
 
 
 def _compress_states_torch(states: torch.Tensor) -> torch.Tensor:
@@ -223,18 +222,16 @@ def compress_states(states):
         if states.dtype == np.float32:
             logger.debug("compress_states: _compress_tensor_ps")
             return _ts._compress_tensor_ps(states)
-        elif states.dtype == np.bool_:
+        if states.dtype == np.bool_:
             logger.debug("compress_states: _compress_tensor_pi8")
             return _ts._compress_tensor_pi8(states)
-        else:
-            raise TypeError("states must be numpy.float32 or numpy.bool_")
-    elif isinstance(states, torch.Tensor):
+        raise TypeError("states must be numpy.float32 or numpy.bool_")
+    if isinstance(states, torch.Tensor):
         logger.debug("compress_states: _compress_states_torch")
         return _compress_states_torch(states)
-    else:
-        raise TypeError(
-            "states must be a numpy.ndarray (float32 or bool_) or a torch.Tensor"
-        )
+    raise TypeError(
+        "states must be a numpy.ndarray (float32 or bool_) or a torch.Tensor"
+    )
 
 
 def sort_states(states, state_count):

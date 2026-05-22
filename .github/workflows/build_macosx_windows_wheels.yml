@@ -20,7 +20,7 @@ jobs:
     steps:
       # check-out this repository
       - uses: actions/checkout@v2
-      # Install Miniconda, as specificed by this repository's environment.yml
+      # Install Miniconda, as specified by this repository's environment.yml
       - uses: conda-incubator/setup-miniconda@v2
         with:
            activate-environment: tensorwheels

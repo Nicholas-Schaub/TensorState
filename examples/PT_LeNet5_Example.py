@@ -120,15 +120,7 @@ for epoch in range(num_epochs):
     valid_accuracy = np.sum(np.multiply(accuracies, nums)) / np.sum(nums)
 
     print(
-        "Epoch {}/{} ({:.2f}s): TrainLoss={:.4f}, TrainAccuracy={:.2f}%, ValidLoss={:.4f}, ValidAccuracy={:.2f}%".format(
-            str(epoch + 1).zfill(3),
-            num_epochs,
-            time.time() - start,
-            train_loss,
-            100 * train_accuracy,
-            valid_loss,
-            100 * valid_accuracy,
-        )
+        f"Epoch {str(epoch + 1).zfill(3)}/{num_epochs} ({time.time() - start:.2f}s): TrainLoss={train_loss:.4f}, TrainAccuracy={100 * train_accuracy:.2f}%, ValidLoss={valid_loss:.4f}, ValidAccuracy={100 * valid_accuracy:.2f}%"
     )
 
     # Early stopping criteria
@@ -170,9 +162,7 @@ print("Evaluating efficiency of each layer...")
 for layer in efficiency_model.efficiency_layers:
     start = time.time()
     print(
-        "Layer {} efficiency: {:.1f}% ({:.3f}s)".format(
-            layer.name, 100 * layer.efficiency(), time.time() - start
-        )
+        f"Layer {layer.name} efficiency: {100 * layer.efficiency():.1f}% ({time.time() - start:.3f}s)"
     )
 
 # Calculate the aIQ

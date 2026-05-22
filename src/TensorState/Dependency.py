@@ -37,7 +37,7 @@ At the graph level:
 from __future__ import annotations
 
 from enum import IntFlag
-from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, ClassVar
 
 import numpy as np
 import torch
@@ -45,7 +45,7 @@ import torchvision
 from grandalf.graphs import Edge, Graph, Vertex, graph_core
 from pydantic import BaseModel, ConfigDict
 
-module_io = Union[torch.Tensor, Tuple[torch.Tensor, ...]]
+module_io = torch.Tensor | tuple[torch.Tensor, ...]
 
 
 class NodeError(Exception):
@@ -61,9 +61,9 @@ class ApoptosisType(IntFlag):
     layer and the connection-correlation filter on the consuming layer.
     """
 
-    states = 0          # state-correlation only (no weight filter)
-    weights = 1         # add weight correlation on producing layer
-    connections = 2     # add weight correlation on consuming layer
+    states = 0  # state-correlation only (no weight filter)
+    weights = 1  # add weight correlation on producing layer
+    connections = 2  # add weight correlation on consuming layer
     wc = weights | connections
 
 
@@ -92,7 +92,7 @@ class ModuleData(GradientData):
 # =============================================================================
 
 
-def zero_info_groups(states: np.ndarray) -> List[List[int]]:
+def zero_info_groups(states: np.ndarray) -> list[list[int]]:
     """Find groups of neurons that contribute no entropy.
 
     Three categories are returned in a single flat list:
@@ -102,7 +102,7 @@ def zero_info_groups(states: np.ndarray) -> List[List[int]]:
     2. **Always-on**: neurons with zero variance whose first observation
        is 1. These always fire.
     3. **Perfectly-correlated clusters**: groups of neurons whose firing
-       patterns are essentially identical (|correlation| ≥ 1 − 1/N²).
+       patterns are essentially identical (|correlation| >= 1 - 1/N^2).
        Each cluster has more than one neuron.
 
     Used by the apoptose pipeline as the first filter on candidate
@@ -126,7 +126,7 @@ def zero_info_groups(states: np.ndarray) -> List[List[int]]:
 
     # NaN correlation rows indicate zero-variance neurons (constants).
     # Use the first observation to decide off vs on, but verify against
-    # all observations to avoid mis-classifying a near-constant neuron
+    # all observations to avoid misclassifying a near-constant neuron
     # whose first sample happens to be an outlier.
     all_nan = np.isnan(corr).all(axis=0)
     off_neurons = np.argwhere(all_nan & ~states.any(axis=0)).flatten().tolist()
@@ -135,17 +135,19 @@ def zero_info_groups(states: np.ndarray) -> List[List[int]]:
     # Correlated clusters: threshold just below 1 to absorb numerical noise.
     threshold = 1.0 - 1.0 / states.shape[0] ** 2
     adjacency = np.abs(corr) >= threshold
-    np.fill_diagonal(adjacency, False)
+    np.fill_diagonal(adjacency, False)  # noqa: FBT003
 
-    groups: List[List[int]] = [off_neurons, on_neurons]
-    seen: Set[int] = set(off_neurons) | set(on_neurons)
+    groups: list[list[int]] = [off_neurons, on_neurons]
+    seen: set[int] = set(off_neurons) | set(on_neurons)
     for i in range(adjacency.shape[0]):
         if i in seen:
             continue
-        cluster = [int(j) for j in np.argwhere(adjacency[i]).flatten() if int(j) not in seen]
+        cluster = [
+            int(j) for j in np.argwhere(adjacency[i]).flatten() if int(j) not in seen
+        ]
         if not cluster:
             continue
-        cluster = [i] + cluster
+        cluster = [i, *cluster]
         for j in cluster:
             seen.add(j)
         groups.append(cluster)
@@ -155,10 +157,10 @@ def zero_info_groups(states: np.ndarray) -> List[List[int]]:
 
 def correlated_weight_groups(
     weight: torch.Tensor,
-    candidates: List[List[int]],
+    candidates: list[list[int]],
     threshold: float = 0.9,
     axis: str = "output",
-) -> List[List[int]]:
+) -> list[list[int]]:
     """Filter candidate groups by weight correlation.
 
     For each candidate group, compute pairwise weight correlation among
@@ -192,7 +194,7 @@ def correlated_weight_groups(
     # Flatten remaining dims so each row is one neuron's full weight vector.
     weight_np = weight_np.reshape(weight_np.shape[0], -1)
 
-    refined: List[List[int]] = []
+    refined: list[list[int]] = []
     for group in candidates:
         if len(group) < 2:
             continue
@@ -202,16 +204,20 @@ def correlated_weight_groups(
         # complementary (not redundant) information and should not be
         # merged. Matches the original neurofilament semantics.
         adjacency = corr > threshold
-        np.fill_diagonal(adjacency, False)
-        seen_local: Set[int] = set()
+        np.fill_diagonal(adjacency, False)  # noqa: FBT003
+        seen_local: set[int] = set()
         for i in range(adjacency.shape[0]):
             if i in seen_local:
                 continue
-            members = [int(j) for j in np.argwhere(adjacency[i]).flatten() if int(j) not in seen_local]
+            members = [
+                int(j)
+                for j in np.argwhere(adjacency[i]).flatten()
+                if int(j) not in seen_local
+            ]
             if not members:
                 continue
-            cluster = [group[i]] + [group[j] for j in members]
-            for j in [i] + members:
+            cluster = [group[i], *(group[j] for j in members)]
+            for j in [i, *members]:
                 seen_local.add(j)
             refined.append(cluster)
 
@@ -247,13 +253,13 @@ class ElementNode(Vertex):
       redundant indices.
     """
 
-    _module_type: Tuple[Union[Type[torch.nn.Module], str], ...] = tuple()
-    _data_type: Tuple[Type, ...] = (ModuleData, GradientData)
+    _module_type: ClassVar[tuple[type[torch.nn.Module] | str, ...]] = ()
+    _data_type: ClassVar[tuple[type, ...]] = (ModuleData, GradientData)
     traverse_node: bool = True
-    data: Union[GradientData, ModuleData]
-    TYPES: Dict[Union[Type[torch.nn.Module], str], OpNode] = {}
+    data: GradientData | ModuleData
+    TYPES: ClassVar[dict[type[torch.nn.Module] | str, OpNode]] = {}
 
-    def __init__(self, data: Union[GradientData, ModuleData]):
+    def __init__(self, data: GradientData | ModuleData):
         assert isinstance(data, self._data_type)
         if len(self._module_type) > 0:
             success = False
@@ -279,10 +285,10 @@ class ElementNode(Vertex):
     @classmethod
     def register(
         cls,
-        module_type: Union[
-            Type[torch.nn.Module], str, Tuple[Union[Type[torch.nn.Module], str], ...]
-        ],
-        func: Optional[ElementNode] = None,
+        module_type: type[torch.nn.Module]
+        | str
+        | tuple[type[torch.nn.Module] | str, ...],
+        func: ElementNode | None = None,
     ):
         if func is None:
             return lambda x: cls.register(module_type=module_type, func=x)
@@ -292,10 +298,10 @@ class ElementNode(Vertex):
         if not isinstance(module_type, tuple):
             module_type = (module_type,)
 
-        func._module_type = tuple()
+        func._module_type = ()
         for mt in module_type:
             cls.TYPES[mt] = func
-            func._module_type = func._module_type + (mt,)
+            func._module_type = (*func._module_type, mt)
         return func
 
     @classmethod
@@ -303,7 +309,7 @@ class ElementNode(Vertex):
         return ElementNode(data)
 
     @classmethod
-    def new(cls, data: Union[GradientData, ModuleData]):
+    def new(cls, data: GradientData | ModuleData):
         cls_types = tuple(t for t in cls.TYPES if not isinstance(t, str))
         str_types = tuple(t for t in cls.TYPES if isinstance(t, str))
         if isinstance(data, ModuleData) and isinstance(data.module, tuple(cls_types)):
@@ -327,7 +333,7 @@ class ElementNode(Vertex):
 
         return cls._default_new(data)
 
-    def _upstream_dendrites(self, vertex: Union[ElementNode, OpNode]):
+    def _upstream_dendrites(self, vertex: ElementNode | OpNode):
         for edge in vertex.e_in():
             vertex = edge.v[0]
             if vertex.traverse_node:
@@ -339,7 +345,7 @@ class ElementNode(Vertex):
 
         return 0
 
-    def _downstream_neurons(self, vertex: Union[ElementNode, OpNode]):
+    def _downstream_neurons(self, vertex: ElementNode | OpNode):
         for edge in vertex.e_out():
             vertex = edge.v[1]
             if vertex.traverse_node:
@@ -367,41 +373,45 @@ class ElementNode(Vertex):
 
     # --- Default merge/destroy: no-op (for nodes that don't own params) ----
 
-    def destroy_outputs(self, idxs: List[int]):
+    def destroy_outputs(self, idxs: list[int]):
         """Remove output neurons at ``idxs``. Base impl is a no-op."""
         return None, idxs
 
-    def destroy_inputs(self, idxs: List[int]):
+    def destroy_inputs(self, idxs: list[int]):
         """Remove input connections at ``idxs``. Base impl is a no-op."""
         return None, idxs
 
-    def merge_outputs(self, groups: List[List[int]]) -> List[int]:
-        """Combine sibling output neurons into the first member of each
-        group. Returns the list of redundant indices (the survivor of
-        each group is NOT in this list). Base impl is a no-op."""
+    def merge_outputs(self, groups: list[list[int]]) -> list[int]:
+        """Combine sibling output neurons into the first member of each group.
+
+        Returns the list of redundant indices (the survivor of each group is
+        NOT in this list). Base impl is a no-op.
+        """
         return _redundant_idxs_from_groups(groups)
 
-    def merge_inputs(self, groups: List[List[int]]) -> List[int]:
-        """Combine sibling input connections by summing weight columns
-        into the first member of each group. Returns the redundant
-        indices. Base impl is a no-op."""
+    def merge_inputs(self, groups: list[list[int]]) -> list[int]:
+        """Combine sibling input connections into the first member of each group.
+
+        Sums weight columns into the survivor. Returns the redundant indices.
+        Base impl is a no-op.
+        """
         return _redundant_idxs_from_groups(groups)
 
     def linked_neurons(
         self,
-        idxs: Union[Tuple[Tuple[int], ...], Tuple[Tuple[Tuple, ...], ...], None] = None,
-    ) -> Union[Tuple[Tuple[int], ...], Tuple[Tuple[Tuple, ...], ...]]:
+        idxs: tuple[tuple[int], ...] | tuple[tuple[tuple, ...], ...] | None = None,
+    ) -> tuple[tuple[int], ...] | tuple[tuple[tuple, ...], ...]:
         if idxs is None:
             return tuple((i,) for i in range(self.neurons()))
-        else:
-            if len(idxs) != self.neurons():
-                raise ValueError(
-                    f"""Node: {self}
-                    Expected idxs to be size {self.neurons()} but was size {len(idxs)}"""
-                )
-            return idxs
+        if len(idxs) != self.neurons():
+            raise ValueError(
+                f"Node: {self}\n"
+                f"    Expected idxs to be size {self.neurons()} but was "
+                f"size {len(idxs)}"
+            )
+        return idxs
 
-    def nd_index(self, idxs: List[int], neurons: Optional[int] = None):
+    def and_index(self, idxs: list[int], neurons: int | None = None):
         if neurons is None:
             neurons = self.neurons()
 
@@ -409,16 +419,17 @@ class ElementNode(Vertex):
 
         if scale == 1:
             return idxs
-        elif scale > 1:
+        if scale > 1:
             out_idxs = []
             for idx in idxs:
                 out_idxs.extend([idx + scale * i for i in range(int(scale))])
         else:
             dendrites = self.dendrites()
             out_idxs = [idx for idx in idxs if idx < dendrites]
-            assert (
-                len(out_idxs) / len(idxs) == scale
-            ), f"{self.__class__.__name__}: scale={scale}, dendrites={self.dendrites()}, neurons={neurons}"
+            assert len(out_idxs) / len(idxs) == scale, (
+                f"{self.__class__.__name__}: scale={scale}, "
+                f"dendrites={self.dendrites()}, neurons={neurons}"
+            )
             for idx in out_idxs:
                 for i in range(int(scale)):
                     assert (idx + scale * i) in idxs
@@ -429,10 +440,10 @@ class ElementNode(Vertex):
 class OpNode(ElementNode):
     """Op node — terminates graph traversal because it owns parameters."""
 
-    _module_type = (torch.nn.Module,)
-    _data_type = (ModuleData,)
+    _module_type: ClassVar[tuple[type[torch.nn.Module] | str, ...]] = (torch.nn.Module,)
+    _data_type: ClassVar[tuple[type, ...]] = (ModuleData,)
     traverse_node: bool = False
-    TYPES: Dict[Union[Type[torch.nn.Module], str], OpNode] = {}
+    TYPES: ClassVar[dict[type[torch.nn.Module] | str, OpNode]] = {}
 
     @classmethod
     def _default_new(cls, data):
@@ -448,27 +459,27 @@ class OpNode(ElementNode):
             f"Not implemented for class {self.__class__.__name__}"
         )
 
-    def destroy_outputs(self, idxs: List[int]):
+    def destroy_outputs(self, idxs: list[int]):
         raise NotImplementedError(
             f"Not implemented for class {self.__class__.__name__}"
         )
 
-    def destroy_inputs(self, idxs: List[int]):
+    def destroy_inputs(self, idxs: list[int]):
         raise NotImplementedError(
             f"Not implemented for class {self.__class__.__name__}"
         )
 
-    def merge_outputs(self, groups: List[List[int]]) -> List[int]:
+    def merge_outputs(self, groups: list[list[int]]) -> list[int]:
         raise NotImplementedError(
             f"Not implemented for class {self.__class__.__name__}"
         )
 
-    def merge_inputs(self, groups: List[List[int]]) -> List[int]:
+    def merge_inputs(self, groups: list[list[int]]) -> list[int]:
         raise NotImplementedError(
             f"Not implemented for class {self.__class__.__name__}"
         )
 
-    def nd_index(self, idxs: List[int], neurons: Optional[int] = None):
+    def and_index(self, idxs: list[int], neurons: int | None = None):
         return None
 
 
@@ -477,9 +488,9 @@ class OpNode(ElementNode):
 # =============================================================================
 
 
-def _redundant_idxs_from_groups(groups: List[List[int]]) -> List[int]:
+def _redundant_idxs_from_groups(groups: list[list[int]]) -> list[int]:
     """Given groups of indices, return everything except the first of each."""
-    out: List[int] = []
+    out: list[int] = []
     for group in groups:
         if len(group) > 1:
             out.extend(group[1:])
@@ -498,10 +509,12 @@ class BatchNormNode(ElementNode):
 
     neurons = dendrites
 
-    def merge_outputs(self, groups: List[List[int]]) -> List[int]:
-        """Average weight, bias, running_mean, running_var across each group.
+    def merge_outputs(self, groups: list[list[int]]) -> list[int]:
+        """Average weight/bias/running stats across each group.
+
         Stores the merged value into the first member; other members are
-        returned as redundant indices."""
+        returned as redundant indices.
+        """
         layer = self.data.module
         for group in groups:
             if len(group) < 2:
@@ -522,7 +535,7 @@ class BatchNormNode(ElementNode):
 
     merge_inputs = merge_outputs  # BatchNorm has no separate input dim
 
-    def destroy_outputs(self, idxs: List[int]):
+    def destroy_outputs(self, idxs: list[int]):
         layer = self.data.module
         keep_idxs = sorted(set(range(layer.num_features)) - set(idxs))
         layer.num_features = layer.num_features - len(idxs)
@@ -554,7 +567,7 @@ class GroupNormNode(ElementNode):
 
     neurons = dendrites
 
-    def merge_outputs(self, groups: List[List[int]]) -> List[int]:
+    def merge_outputs(self, groups: list[list[int]]) -> list[int]:
         layer = self.data.module
         if not layer.affine:
             return _redundant_idxs_from_groups(groups)
@@ -568,15 +581,15 @@ class GroupNormNode(ElementNode):
 
     merge_inputs = merge_outputs
 
-    def destroy_outputs(self, idxs: List[int]):
+    def destroy_outputs(self, idxs: list[int]):
         layer = self.data.module
         keep_idxs = sorted(set(range(layer.num_channels)) - set(idxs))
         layer.num_channels = layer.num_channels - len(idxs)
         # num_groups must still divide num_channels evenly. If not, downstream
         # behaviour is undefined; warn the caller via assertion.
-        assert (
-            layer.num_channels % layer.num_groups == 0
-        ), "GroupNorm num_channels must remain divisible by num_groups after destroy"
+        assert layer.num_channels % layer.num_groups == 0, (
+            "GroupNorm num_channels must remain divisible by num_groups after destroy"
+        )
 
         if layer.affine:
             layer.weight = torch.nn.Parameter(layer.weight.data.clone()[keep_idxs])
@@ -606,7 +619,7 @@ class LayerNormNode(ElementNode):
 
     neurons = dendrites
 
-    def merge_outputs(self, groups: List[List[int]]) -> List[int]:
+    def merge_outputs(self, groups: list[list[int]]) -> list[int]:
         layer = self.data.module
         if not layer.elementwise_affine:
             return _redundant_idxs_from_groups(groups)
@@ -621,12 +634,14 @@ class LayerNormNode(ElementNode):
 
     merge_inputs = merge_outputs
 
-    def destroy_outputs(self, idxs: List[int]):
+    def destroy_outputs(self, idxs: list[int]):
         layer = self.data.module
         n = self.dendrites()
         keep_idxs = sorted(set(range(n)) - set(idxs))
         new_n = n - len(idxs)
-        layer.normalized_shape = (new_n,) if isinstance(layer.normalized_shape, tuple) else new_n
+        layer.normalized_shape = (
+            (new_n,) if isinstance(layer.normalized_shape, tuple) else new_n
+        )
 
         if layer.elementwise_affine:
             layer.weight = torch.nn.Parameter(layer.weight.data.clone()[keep_idxs])
@@ -644,8 +659,8 @@ class LayerNormNode(ElementNode):
 
 @ElementNode.register(
     (
-        torch.nn.modules.pooling._AdaptiveMaxPoolNd,
-        torch.nn.modules.pooling._AdaptiveAvgPoolNd,
+        torch.nn.modules.pooling._AdaptiveMaxPoolAnd,
+        torch.nn.modules.pooling._AdaptiveAvgPoolAnd,
     )
 )
 class AdaptivePoolNode(ElementNode):
@@ -663,7 +678,7 @@ class ReshapeNode(ElementNode):
 
     def linked_neurons(
         self,
-        idxs: Union[Tuple[Tuple[int], ...], Tuple[Tuple[Tuple, ...], ...], None] = None,
+        idxs: tuple[tuple[int], ...] | tuple[tuple[tuple, ...], ...] | None = None,
     ):
         idxs = super().linked_neurons(idxs)
         dendrites = self.dendrites()
@@ -675,9 +690,9 @@ class ReshapeNode(ElementNode):
 # =============================================================================
 
 
-@OpNode.register(torch.nn.modules.conv._ConvNd)
+@OpNode.register(torch.nn.modules.conv._ConvAnd)
 class ConvNode(OpNode):
-    def __init__(self, data: Union[GradientData, ModuleData]):
+    def __init__(self, data: GradientData | ModuleData):
         super().__init__(data)
         assert isinstance(data, ModuleData)
         if data.module.groups != 1:
@@ -689,15 +704,13 @@ class ConvNode(OpNode):
     def neurons(self):
         return self.data.module.out_channels
 
-    def merge_outputs(self, groups: List[List[int]]) -> List[int]:
+    def merge_outputs(self, groups: list[list[int]]) -> list[int]:
         """Average weights and biases across each group's output channels.
+
         Linearity rule: the producing-layer weights are *averaged* so the
-        merged neuron's output equals the average of the originals."""
+        merged neuron's output equals the average of the originals.
+        """
         layer = self.data.module
-        if layer.transposed:
-            out_axis = 1
-        else:
-            out_axis = 0
         for group in groups:
             if len(group) < 2:
                 continue
@@ -708,13 +721,14 @@ class ConvNode(OpNode):
                 layer.weight.data[:, dead] = layer.weight.data[:, group].mean(dim=1)
             if layer.bias is not None:
                 layer.bias.data[dead] = layer.bias.data[group].mean(dim=0)
-        _ = out_axis  # documented but not needed once branched above
         return _redundant_idxs_from_groups(groups)
 
-    def merge_inputs(self, groups: List[List[int]]) -> List[int]:
-        """Sum input weight columns across each group. Linearity rule:
-        the consuming-layer weights are *summed* so the new effective
-        weight is `sum_i W_i` instead of `W_i * mean_signal`."""
+    def merge_inputs(self, groups: list[list[int]]) -> list[int]:
+        """Sum input weight columns across each group.
+
+        Linearity rule: the consuming-layer weights are *summed* so the new
+        effective weight is `sum_i W_i` instead of `W_i * mean_signal`.
+        """
         layer = self.data.module
         for group in groups:
             if len(group) < 2:
@@ -726,7 +740,7 @@ class ConvNode(OpNode):
                 layer.weight.data[dead] = layer.weight.data[group].sum(dim=0)
         return _redundant_idxs_from_groups(groups)
 
-    def destroy_outputs(self, idxs: List[int]):
+    def destroy_outputs(self, idxs: list[int]):
         layer = self.data.module
         keep_idxs = sorted(set(range(layer.out_channels)) - set(idxs))
         layer.out_channels -= len(idxs)
@@ -740,7 +754,7 @@ class ConvNode(OpNode):
 
         return keep_idxs, idxs
 
-    def destroy_inputs(self, idxs: List[int]):
+    def destroy_inputs(self, idxs: list[int]):
         layer = self.data.module
         keep_idxs = sorted(set(range(layer.in_channels)) - set(idxs))
         layer.in_channels = layer.in_channels - len(idxs)
@@ -753,11 +767,11 @@ class ConvNode(OpNode):
         return keep_idxs, idxs
 
 
-@ElementNode.register(torch.nn.modules.conv._ConvNd)
+@ElementNode.register(torch.nn.modules.conv._ConvAnd)
 class ConvGroupNode(ElementNode):
     """Depthwise / fully-grouped conv: in_channels == groups."""
 
-    def __init__(self, data: Union[GradientData, ModuleData]):
+    def __init__(self, data: GradientData | ModuleData):
         super().__init__(data)
         assert isinstance(data, ModuleData)
         if (
@@ -772,7 +786,7 @@ class ConvGroupNode(ElementNode):
     def neurons(self):
         return self.data.module.out_channels
 
-    def merge_outputs(self, groups: List[List[int]]) -> List[int]:
+    def merge_outputs(self, groups: list[list[int]]) -> list[int]:
         layer = self.data.module
         for group in groups:
             if len(group) < 2:
@@ -788,7 +802,7 @@ class ConvGroupNode(ElementNode):
 
     merge_inputs = merge_outputs  # depthwise: in_channel == out_channel per group
 
-    def destroy_outputs(self, idxs: List[int]):
+    def destroy_outputs(self, idxs: list[int]):
         layer = self.data.module
         keep_idxs = sorted(set(range(layer.out_channels)) - set(idxs))
         layer.out_channels -= len(idxs)
@@ -821,7 +835,7 @@ class LinearNode(OpNode):
     def neurons(self):
         return self.data.module.out_features
 
-    def merge_outputs(self, groups: List[List[int]]) -> List[int]:
+    def merge_outputs(self, groups: list[list[int]]) -> list[int]:
         """Average weight rows + bias entries across each group."""
         layer = self.data.module
         for group in groups:
@@ -833,7 +847,7 @@ class LinearNode(OpNode):
                 layer.bias.data[dead] = layer.bias.data[group].mean(dim=0)
         return _redundant_idxs_from_groups(groups)
 
-    def merge_inputs(self, groups: List[List[int]]) -> List[int]:
+    def merge_inputs(self, groups: list[list[int]]) -> list[int]:
         """Sum weight columns across each group's input features."""
         layer = self.data.module
         for group in groups:
@@ -843,7 +857,7 @@ class LinearNode(OpNode):
             layer.weight.data[:, dead] = layer.weight.data[:, group].sum(dim=1)
         return _redundant_idxs_from_groups(groups)
 
-    def destroy_outputs(self, idxs: List[int]):
+    def destroy_outputs(self, idxs: list[int]):
         layer = self.data.module
         keep_idxs = sorted(set(range(layer.out_features)) - set(idxs))
         layer.out_features -= len(idxs)
@@ -852,7 +866,7 @@ class LinearNode(OpNode):
             layer.bias = torch.nn.Parameter(layer.bias.data.clone()[keep_idxs])
         return keep_idxs, idxs
 
-    def destroy_inputs(self, idxs: List[int]):
+    def destroy_inputs(self, idxs: list[int]):
         layer = self.data.module
         keep_idxs = sorted(set(range(layer.in_features)) - set(idxs))
         layer.in_features = layer.in_features - len(idxs)
@@ -866,19 +880,19 @@ class LinearNode(OpNode):
 
 
 class Dependency(Edge):
-    x: Union[OpNode, ElementNode]
-    y: Union[OpNode, ElementNode]
-    w: Union[int, float] = 1
-    data: Optional[Any] = None
+    x: OpNode | ElementNode
+    y: OpNode | ElementNode
+    w: int | float = 1
+    data: Any | None = None
     connect: bool = False
 
     def __init__(
         self,
-        x: Union[OpNode, ElementNode],
-        y: Union[OpNode, ElementNode],
-        w: Union[int, float] = 1,
-        data: Optional[Any] = None,
-        connect: bool = False,
+        x: OpNode | ElementNode,
+        y: OpNode | ElementNode,
+        w: int | float = 1,
+        data: Any | None = None,
+        connect: bool = False,  # noqa: FBT001, FBT002 -- grandalf Edge API
     ):
         assert isinstance(x, (OpNode, ElementNode))
         assert isinstance(y, (OpNode, ElementNode))
@@ -904,16 +918,16 @@ class GroupGraph(graph_core):
       linked neurons. The standard apoptosis entry point.
     """
 
-    def destroy(self, idxs: List[int]):
+    def destroy(self, idxs: list[int]):
         """Destroy connected neurons across the graph at ``idxs`` (no merge)."""
-        stack_type = Tuple[Union[OpNode, ElementNode], List[int]]
+        stack_type = tuple[OpNode | ElementNode, list[int]]
 
         leaves = self.leaves()
         roots = self.roots()
-        process_stack: List[stack_type] = [(leaf, idxs) for leaf in leaves]
-        visited: Set[Union[OpNode, ElementNode]] = set()
+        process_stack: list[stack_type] = [(leaf, idxs) for leaf in leaves]
+        visited: set[OpNode | ElementNode] = set()
 
-        destroy_stack: List[stack_type] = []
+        destroy_stack: list[stack_type] = []
 
         while len(process_stack) > 0:
             node, indices = process_stack.pop()
@@ -921,9 +935,9 @@ class GroupGraph(graph_core):
                 continue
             visited.add(node)
 
-            new_indices = node.nd_index(indices)
+            new_indices = node.and_index(indices)
             for edge in node.e_in():
-                vertex: Union[OpNode, ElementNode] = edge.v[0]
+                vertex: OpNode | ElementNode = edge.v[0]
                 process_stack.append(
                     (vertex, new_indices if new_indices is not None else indices)
                 )
@@ -944,7 +958,7 @@ class GroupGraph(graph_core):
     # Back-compat alias.
     apoptosis = destroy
 
-    def apoptose(self, groups: List[List[int]]):
+    def apoptose(self, groups: list[list[int]]):
         """Merge + destroy along the chain for each group of linked output neurons.
 
         For each producing node in the chain, calls ``merge_outputs(groups)``
@@ -965,12 +979,12 @@ class GroupGraph(graph_core):
         if not idxs:
             return
 
-        stack_type = Tuple[Union[OpNode, ElementNode], List[List[int]]]
+        stack_type = tuple[OpNode | ElementNode, list[list[int]]]
         leaves = self.leaves()
         roots = self.roots()
-        process_stack: List[stack_type] = [(leaf, groups) for leaf in leaves]
-        visited: Set[Union[OpNode, ElementNode]] = set()
-        apoptose_stack: List[stack_type] = []
+        process_stack: list[stack_type] = [(leaf, groups) for leaf in leaves]
+        visited: set[OpNode | ElementNode] = set()
+        apoptose_stack: list[stack_type] = []
 
         while len(process_stack) > 0:
             node, node_groups = process_stack.pop()
@@ -981,15 +995,15 @@ class GroupGraph(graph_core):
             # Translate indices through reshape/pool nodes if they alter the
             # output-to-input mapping.
             flat = _redundant_idxs_from_groups(node_groups)
-            new_flat = node.nd_index(flat)
+            new_flat = node.and_index(flat)
             if new_flat is not None and new_flat != flat:
-                # Heuristic: if nd_index reorders/scales, we conservatively
+                # Heuristic: if and_index reorders/scales, we conservatively
                 # keep the original group structure for the upstream walk.
                 # (Most layer types don't alter neuron identity.)
                 pass
 
             for edge in node.e_in():
-                vertex: Union[OpNode, ElementNode] = edge.v[0]
+                vertex: OpNode | ElementNode = edge.v[0]
                 process_stack.append((vertex, node_groups))
 
             if isinstance(node.data, ModuleData):
@@ -1020,7 +1034,7 @@ class GroupGraph(graph_core):
 
         process_stack = []
         for node in leaves:
-            indices = list([(i,) for i in range(node.dendrites())])
+            indices = [(i,) for i in range(node.dendrites())]
             for edge in node.e_in():
                 process_stack.append((edge.v[0], indices))
 
@@ -1045,17 +1059,19 @@ class GroupGraph(graph_core):
 
 class ModuleGraph(Graph):
     model: torch.nn.Module
-    _visit_count: Dict[torch.nn.Module, int] = {}
-    _grad_trace: Dict[Any, torch.nn.Module] = {}
+    _visit_count: ClassVar[dict[torch.nn.Module, int]] = {}
+    _grad_trace: ClassVar[dict[Any, torch.nn.Module]] = {}
     _block_hook: bool = True
 
     def __init__(
         self,
         model: torch.nn.Module,
-        inp_tensor: module_io = torch.ones((1, 3, 256, 256)),
+        inp_tensor: module_io | None = None,
     ):
+        if inp_tensor is None:
+            inp_tensor = torch.ones((1, 3, 256, 256))
         self.model = model
-        self._visit_count = {module: 0 for module in model.modules()}
+        self._visit_count = dict.fromkeys(model.modules(), 0)
 
         hooks = [
             module.register_forward_hook(self)
@@ -1073,8 +1089,8 @@ class ModuleGraph(Graph):
             hook.remove()
 
         # Trace the network and generate the nodes and edges
-        gradients: List[torch.autograd.graph.Node] = [out.grad_fn]
-        visited_nodes: List[torch.autograd.graph.Node] = []
+        gradients: list[torch.autograd.graph.Node] = [out.grad_fn]
+        visited_nodes: list[torch.autograd.graph.Node] = []
 
         if out.grad_fn in self._grad_trace:
             node = OpNode.new(
@@ -1089,8 +1105,8 @@ class ModuleGraph(Graph):
                 data=GradientData(grad_fn=out.grad_fn, name=out.grad_fn.name())
             )
 
-        nodes: Dict[Any, Union[OpNode, ElementNode]] = {out.grad_fn: node}
-        edges: List[Dependency] = []
+        nodes: dict[Any, OpNode | ElementNode] = {out.grad_fn: node}
+        edges: list[Dependency] = []
 
         while len(gradients) > 0:
             grad_fn = gradients.pop()
@@ -1150,7 +1166,7 @@ class ModuleGraph(Graph):
             while len(duplicates) > 0:
                 grad_fn = duplicates.pop()
 
-                vertices: List[Vertex] = [
+                vertices: list[Vertex] = [
                     v
                     for v in component.V()
                     if isinstance(v.data, ModuleData) and v.data.grad_fn == grad_fn
@@ -1181,7 +1197,7 @@ class ModuleGraph(Graph):
         if self._block_hook:
             raise RuntimeError(
                 "Module is intended to be used as a forward hook and "
-                + "should not be directly called."
+                "should not be directly called."
             )
         self._visit_count[module] += 1
         if isinstance(outputs, tuple):

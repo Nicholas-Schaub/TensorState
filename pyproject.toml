@@ -37,9 +37,8 @@ Issues = "https://github.com/Nicholas-Schaub/TensorState/issues"
 [dependency-groups]
 dev = [
     "cython>=3.0",
-    "black>=24.0",
-    "mypy>=1.10",
-    "ruff>=0.4",
+    "ruff>=0.6",
+    "ty",
     "pre-commit>=3.7",
     "bump-my-version>=0.21",
     "pytest>=8.0",
@@ -73,12 +72,92 @@ line-length = 88
 target-version = "py313"
 
 [tool.ruff.lint]
-select = ["E", "F", "W", "I", "B", "UP", "D"]
-ignore = ["D100", "D104"]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "D",    # pydocstyle
+    "ANN",  # flake8-annotations
+    "BLE",  # flake8-blind-except
+    "C4",   # flake8-comprehensions
+    "FBT",  # flake8-boolean-trap
+    "ICN",  # flake8-import-conventions
+    "ISC",  # flake8-implicit-str-concat
+    "N",    # pep8-naming
+    "NPY",  # numpy-specific
+    "PIE",  # flake8-pie
+    "PT",   # flake8-pytest-style
+    "PTH",  # flake8-use-pathlib
+    "Q",    # flake8-quotes
+    "RET",  # flake8-return
+    "RSE",  # flake8-raise
+    "RUF",  # ruff-specific
+    "SIM",  # flake8-simplify
+    "TC",   # flake8-type-checking
+    "TID",  # flake8-tidy-imports
+    "TRY",  # tryceratops
+]
+ignore = [
+    "D100",    # missing docstring in public module
+    "D104",    # missing docstring in public package
+    "D203",    # 1 blank line required before class docstring (conflicts with D211)
+    "D213",    # multi-line docstring summary should start at second line (conflicts with D212)
+    "ANN401",  # dynamically typed expressions (Any) — research code uses Any
+    "TRY003",  # avoid long messages outside exception class — too restrictive
+    # Deferred to AIQ-8 (docstring + type-annotation pass)
+    "D101",    # undocumented-public-class
+    "D102",    # undocumented-public-method
+    "D105",    # undocumented-magic-method
+    "D107",    # undocumented-public-init
+    "ANN001",  # missing-type-function-argument
+    "ANN002",  # missing-type-args
+    "ANN003",  # missing-type-kwargs
+    "ANN201",  # missing-return-type-undocumented-public-function
+    "ANN202",  # missing-return-type-private-function
+    "ANN204",  # missing-return-type-special-method
+    "ANN206",  # missing-return-type-class-method
+    # Deferred to AIQ-18 (layout reorganization)
+    "N999",    # invalid-module-name (TensorState/States.py etc. are CamelCase)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D", "ANN", "S101", "N803", "N806"]
+"benches/**" = ["D", "ANN", "T201", "E501"]
+# Examples are demo scripts; relax most rules so they read naturally.
+"examples/**" = [
+    "D", "ANN", "T201", "E501",
+    "B007", "B905", "C416",
+    "FBT001", "FBT002", "FBT003",
+    "N813", "N814", "N816",
+    "NPY002", "RET504", "F821",
+]
+# setup.py is a small Cython build hook.
+"setup.py" = ["ICN001", "D"]
+# Triton kernels use ALL_CAPS for compile-time constants by convention.
+"src/TensorState/States.py" = ["N803", "N806"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 
-[tool.mypy]
-python_version = "3.13"
-ignore_missing_imports = true
+[tool.ruff.format]
+# Defaults: double quotes, 4-space indent, magic trailing comma respected.
+
+[tool.ty.src]
+include = ["src", "tests"]
+
+[tool.ty.environment]
+python-version = "3.13"
+
+# Rules deferred to AIQ-8 (type-annotation + narrowing pass).
+# These are surfaced by ty but require refactors to fix properly
+# (e.g., narrowing `data: ModuleData` on each OpNode subclass).
+[tool.ty.rules]
+unresolved-attribute = "warn"
+invalid-attribute-access = "warn"
+invalid-assignment = "warn"
+invalid-argument-type = "warn"
+not-subscriptable = "warn"
+call-non-callable = "warn"

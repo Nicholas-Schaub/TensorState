@@ -1,15 +1,16 @@
 import abc
+import contextlib
 import logging
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import ClassVar
 
 import numpy as np
 import torch
 import zarr
 
 import TensorState
-import TensorState.States as ts
+import TensorState.States as ts  # noqa: N813 -- deliberate package alias
 
 logging.basicConfig(
     format="%(asctime)s - %(name)-10s - %(levelname)-8s - %(message)s",
@@ -45,10 +46,10 @@ class AbstractStateCapture(abc.ABC):
     """
 
     capture_on: bool = True
-    memory_device: Union[str, int]
+    memory_device: str | int
     _chunk_size: int = 0
-    _state_shape: Tuple
-    _entropy: Optional[float] = None
+    _state_shape: tuple
+    _entropy: float | None = None
     _state_count: int = 0
 
     @property
@@ -96,14 +97,14 @@ class AbstractStateCapture(abc.ABC):
     _counts = None
     _input_shape = None
     _state_ids = None
-    _threads: List[Future] = []
+    _threads: ClassVar[list[Future]] = []
     _zarr_path = None
     _channel_index = -1
     _state_cache = None
     _state_cache_index = 0
 
     def __init__(
-        self, name, disk_path=None, memory_device: Union[str, int] = "cpu", **kwargs
+        self, name, disk_path=None, memory_device: str | int = "cpu", **kwargs
     ):
         """Abstract State Capture Layer.
 
@@ -116,16 +117,14 @@ class AbstractStateCapture(abc.ABC):
                 are accumulated in a GPU-resident cache before being flushed
                 to main memory in batches.
             **kwargs: Keyword arguments. Used for passing arguments to other
-                classes that inerit from AbstractStateCapture.
+                classes that inherit from AbstractStateCapture.
         """
         self._executor = ThreadPoolExecutor(4)
 
         # Assign a name to the layer. Some inheriting classes make name
         # protected, so catch the error just in case.
-        try:
+        with contextlib.suppress(AttributeError):
             self.name = name
-        except AttributeError:
-            pass
 
         # Set up zarr, but don't create anything
         if disk_path is not None:
@@ -141,7 +140,7 @@ class AbstractStateCapture(abc.ABC):
         if memory_device == "gpu" and not torch.cuda.is_available():
             logger.warning(
                 "Memory device set to gpu, but torch.cuda is not available. "
-                + "Changing memory device to cpu."
+                "Changing memory device to cpu."
             )
             self.memory_device = "cpu"
         else:
@@ -176,7 +175,7 @@ class AbstractStateCapture(abc.ABC):
             if self._state_cache_index + states.shape[0] > self._state_cache.shape[0]:
                 logger.debug(
                     "_compress_and_store: GPU cache full, collecting and "
-                    + "sending to main memory."
+                    "sending to main memory."
                 )
                 if self._state_cache_index > 0:
                     states = torch.vstack(
@@ -244,13 +243,9 @@ class AbstractStateCapture(abc.ABC):
     def states_per_instance(self):
         """Average number of states per input instance."""
         # TODO: Verify this is correct for PyTorch
-        num_states = (
-            np.prod(self._input_shape[1:]) / self._input_shape[self._channel_index]
-        )
+        return np.prod(self._input_shape[1:]) / self._input_shape[self._channel_index]
 
-        return num_states
-
-    def _instance_indices(self, index: Union[int, List[int], np.ndarray]) -> np.ndarray:
+    def _instance_indices(self, index: int | list[int] | np.ndarray) -> np.ndarray:
         # Convert to numpy array if needed
         if not isinstance(index, np.ndarray):
             if isinstance(index, int):
@@ -288,8 +283,8 @@ class AbstractStateCapture(abc.ABC):
         if self._input_shape is None:
             raise ValueError(
                 "The input_shape is None, and no previous input shape "
-                + "information was provided. The first time reset_states is "
-                + "called, an input_shape must be provided."
+                "information was provided. The first time reset_states is "
+                "called, an input_shape must be provided."
             )
 
         # Try to keep chunks limited to 16MB
@@ -377,9 +372,7 @@ class AbstractStateCapture(abc.ABC):
 
         return self._state_ids
 
-    def counts(
-        self, index: Optional[Union[int, List[int], np.ndarray]] = None
-    ) -> List[int]:
+    def counts(self, index: int | list[int] | np.ndarray | None = None) -> list[int]:
         """Layer state counts.
 
         This method returns a numpy.array of integers, where each integer is the
@@ -394,7 +387,7 @@ class AbstractStateCapture(abc.ABC):
                 ``None``, then all counts are returned. Defaults to ``None``.
 
         Returns:
-            Counts of stat occurences
+            Counts of stat occurrences
         """
         if not isinstance(self._counts, np.ndarray) or index is not None:
             if index is None:
@@ -445,8 +438,7 @@ class AbstractStateCapture(abc.ABC):
         """
         if alpha is None:
             return self.max_entropy()
-        else:
-            return TensorState.entropy(self.counts(), alpha)
+        return TensorState.entropy(self.counts(), alpha)
 
     def efficiency(self, alpha1=1, alpha2=None):
         """Calculate the efficiency of the layer.
@@ -468,9 +460,9 @@ class AbstractStateCapture(abc.ABC):
             [float]: The efficiency of the layer
         """
         assert isinstance(alpha1, (float, int)), "alpha1 must be a float or int"
-        assert isinstance(
-            alpha2, (float, int, None.__class__)
-        ), "alpha2 must be a float, int, or None"
+        assert isinstance(alpha2, (float, int, None.__class__)), (
+            "alpha2 must be a float, int, or None"
+        )
         if alpha2 is not None:
             assert alpha1 > alpha2, "alpha1 must be larger than alpha 2"
 
@@ -484,9 +476,7 @@ class StateCaptureHook(AbstractStateCapture):
     designed to be a pre or post hook for a layer.
     """
 
-    def __init__(  # noqa: D107
-        self, name, disk_path=None, memory_device="cpu", **kwargs
-    ):
+    def __init__(self, name, disk_path=None, memory_device="cpu", **kwargs):
         # Use both parent class initializers
         super().__init__(name, disk_path, memory_device=memory_device, **kwargs)
 
@@ -500,7 +490,7 @@ class StateCaptureHook(AbstractStateCapture):
             tensor = (tensor > 0).cpu().numpy()
         self._compress_and_store(tensor)
 
-    def __call__(self, *args):  # noqa: D102
+    def __call__(self, *args):
         if self._input_shape is None:
             self.reset_states(tuple(args[-1].shape))
 
@@ -508,7 +498,7 @@ class StateCaptureHook(AbstractStateCapture):
             return
 
         # Transform the tensor to channels-last memory layout (NHWC)
-        dim_order = (0,) + tuple(i for i in range(2, args[-1].ndim)) + (1,)
+        dim_order = (0, *(i for i in range(2, args[-1].ndim)), 1)
         inputs = args[-1].detach().permute(*dim_order).contiguous()
 
         # Store the data using a thread

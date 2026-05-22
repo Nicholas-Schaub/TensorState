@@ -283,8 +283,8 @@ states for all 10,000 images would be 24·24·10,000 = 5,760,000 states,
 which is the number of states observed by `conv_1_post_states`.
 
 !!! note
-    The `state_count` is the raw number of states observed, and there are
-    likely states that occur multiple times.
+The `state_count` is the raw number of states observed, and there are
+likely states that occur multiple times.
 
 Now that the states of each layer have been captured, let's analyze the
 state space using the efficiency metric originally described by
