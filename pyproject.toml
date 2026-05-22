@@ -28,9 +28,6 @@ examples = [
     "lightning>=2.2,<3.0",
     "matplotlib>=3.8,<4.0",
 ]
-cuda = [
-    "cupy-cuda12x>=13.0,<14.0",
-]
 
 [project.urls]
 Homepage = "https://github.com/Nicholas-Schaub/tensorstate"

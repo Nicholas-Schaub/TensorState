@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
 import numpy as np
+import torch
 import zarr
 
 import TensorState
@@ -15,13 +16,6 @@ logging.basicConfig(
     datefmt="%d-%b-%y %H:%M:%S",
 )
 logger = logging.getLogger("TensorState.Layers")
-
-try:
-    import cupy
-
-    has_cupy = True
-except ModuleNotFoundError:
-    has_cupy = False
 
 
 class AbstractStateCapture(abc.ABC):
@@ -117,10 +111,10 @@ class AbstractStateCapture(abc.ABC):
             name: Name of the state capture layer.
             disk_path: Path on disk to save captured states in zarr format.
                 Defaults to None.
-            memory_device: This should be either "cpu" or "gpu". When this is
-                set to "gpu", cupy is installed, and the model is running on a
-                gpu, then this will store a cache of data on the gpu where the
-                states are being collected.
+            memory_device: This should be either "cpu" or "gpu". When set to
+                "gpu" and a CUDA-capable PyTorch is available, captured states
+                are accumulated in a GPU-resident cache before being flushed
+                to main memory in batches.
             **kwargs: Keyword arguments. Used for passing arguments to other
                 classes that inerit from AbstractStateCapture.
         """
@@ -144,9 +138,9 @@ class AbstractStateCapture(abc.ABC):
             self._zarr_path = self._zarr_path.joinpath(name + ".zarr")
             self._zarr_path.mkdir(exist_ok=False)
 
-        if not has_cupy and memory_device == "gpu":
+        if memory_device == "gpu" and not torch.cuda.is_available():
             logger.warning(
-                "Memory device set to gpu, but cupy is not installed. "
+                "Memory device set to gpu, but torch.cuda is not available. "
                 + "Changing memory device to cpu."
             )
             self.memory_device = "cpu"
@@ -164,26 +158,28 @@ class AbstractStateCapture(abc.ABC):
         # Calculate the number of states to process
         num_states = int(np.prod(inputs.shape[0:-1]))
 
-        # Resize the array using the appropriate library
-        if has_cupy and isinstance(inputs, cupy.ndarray):
-            logger.debug("_compress_and_store: cupy.reshape")
-            states = cupy.reshape(inputs, (-1, int(inputs.shape[-1])))
+        # Reshape using the appropriate library
+        if isinstance(inputs, torch.Tensor):
+            logger.debug("_compress_and_store: torch.reshape")
+            states = inputs.reshape(-1, int(inputs.shape[-1]))
         else:
             logger.debug("_compress_and_store: numpy.reshape")
             states = np.reshape(inputs, (-1, int(inputs.shape[-1])))
 
-        # Compress states
+        # Compress states. Output backend matches input: numpy for numpy,
+        # torch.Tensor for torch input.
         states = ts.compress_states(states)
 
-        # If using cupy array, cast back to numpy
-        if self.memory_device != "cpu" and isinstance(states, cupy.ndarray):
+        # GPU cache path: accumulate compressed bytes on GPU before flushing
+        # to main memory in chunks.
+        if self.memory_device != "cpu" and isinstance(states, torch.Tensor):
             if self._state_cache_index + states.shape[0] > self._state_cache.shape[0]:
                 logger.debug(
                     "_compress_and_store: GPU cache full, collecting and "
                     + "sending to main memory."
                 )
                 if self._state_cache_index > 0:
-                    states = cupy.vstack(
+                    states = torch.vstack(
                         (self._state_cache[: self._state_cache_index], states)
                     )
                 num_states += self._state_cache_index
@@ -196,9 +192,10 @@ class AbstractStateCapture(abc.ABC):
                 self._state_cache_index += states.shape[0]
                 return True
 
-        if has_cupy and isinstance(states, cupy.ndarray):
-            logger.debug("_compress_and_store: cupy -> numpy")
-            states = states.get()
+        # Move any torch tensor to numpy before zarr write.
+        if isinstance(states, torch.Tensor):
+            logger.debug("_compress_and_store: torch -> numpy")
+            states = states.cpu().numpy()
 
         # Resize the zarr array if needed
         if 2 * num_states + self._state_count >= self._raw_states.shape[0]:
@@ -219,12 +216,12 @@ class AbstractStateCapture(abc.ABC):
         return True
 
     def _collect_cache(self):
-        logger.debug("_collect_cache: cupy -> numpy")
+        logger.debug("_collect_cache: torch -> numpy")
         if self._state_cache_index == 0 or self._state_cache is None:
             return True
 
         num_states = self._state_cache_index
-        states = self._state_cache[:num_states].get()
+        states = self._state_cache[:num_states].cpu().numpy()
 
         # Resize the zarr array if needed
         if 2 * num_states + self._state_count >= self._raw_states.shape[0]:
@@ -341,11 +338,14 @@ class AbstractStateCapture(abc.ABC):
             and input_shape[0] < self._chunk_size[0]
         ):
             if self._state_cache is None:
-                device = (
+                device_idx = (
                     self.memory_device if isinstance(self.memory_device, int) else 0
                 )
-                with cupy.cuda.Device(device):
-                    self._state_cache = cupy.zeros(self._chunk_size, dtype=cupy.uint8)
+                self._state_cache = torch.zeros(
+                    self._chunk_size,
+                    dtype=torch.uint8,
+                    device=f"cuda:{device_idx}",
+                )
             self._state_cache_index = 0
 
     def state_ids(self):
@@ -477,58 +477,39 @@ class AbstractStateCapture(abc.ABC):
         return self.entropy(alpha1) / self.entropy(alpha2)
 
 
-try:
-    import torch
+class StateCaptureHook(AbstractStateCapture):
+    """StateCapture hook for PyTorch.
 
-    class StateCaptureHook(AbstractStateCapture):
-        """StateCapture hook for PyTorch.
+    This class implements all methods in AbstractStateCapture, but is
+    designed to be a pre or post hook for a layer.
+    """
 
-        This class implements all methods in AbstractStateCapture, but is
-        designed to be a pre or post hook for a layer.
+    def __init__(  # noqa: D107
+        self, name, disk_path=None, memory_device="cpu", **kwargs
+    ):
+        # Use both parent class initializers
+        super().__init__(name, disk_path, memory_device=memory_device, **kwargs)
 
-        """
+        self._channel_index = 1
 
-        def __init__(  # noqa: D107
-            self, name, disk_path=None, memory_device="cpu", **kwargs
-        ):
-            # Use both parent class initializers
-            super().__init__(name, disk_path, memory_device=memory_device, **kwargs)
+    def _thread(self, tensor: torch.Tensor):
+        if tensor.device.type == "cuda" and self.memory_device != "cpu":
+            # Keep on GPU; compress_states handles torch tensors natively.
+            pass
+        else:
+            tensor = (tensor > 0).cpu().numpy()
+        self._compress_and_store(tensor)
 
-            self._channel_index = 1
+    def __call__(self, *args):  # noqa: D102
+        if self._input_shape is None:
+            self.reset_states(tuple(args[-1].shape))
 
-        def _thread(self, tensor: torch.Tensor):
-            if has_cupy and tensor.device.type == "cuda":
-                with cupy.cuda.Device(tensor.device.index):
-                    tensor = cupy.asarray(tensor)
-            else:
-                tensor = (tensor > 0).cpu().numpy()
-            self._compress_and_store(tensor)
+        if not self.capture_on:
+            return
 
-        def __call__(self, *args):  # noqa: D102
-            if self._input_shape is None:
-                self.reset_states(tuple(args[-1].shape))
+        # Transform the tensor to channels-last memory layout (NHWC)
+        dim_order = (0,) + tuple(i for i in range(2, args[-1].ndim)) + (1,)
+        inputs = args[-1].detach().permute(*dim_order).contiguous()
 
-            if not self.capture_on:
-                return
-
-            # Transform the tensor to channels-last memory layout (NHWC)
-            dim_order = (0,) + tuple(i for i in range(2, args[-1].ndim)) + (1,)
-            inputs = args[-1].detach().permute(*dim_order).contiguous()
-
-            # Store the data using a thread
-            self._threads.append(self._executor.submit(self._thread, inputs))
-
-except ModuleNotFoundError:
-
-    class StateCaptureHook(AbstractStateCapture):  # type: ignore
-        """StateCapture hook for PyTorch.
-
-        This class implements all methods in AbstractStateCapture, but is
-        designed to be a pre or post hook for a layer.
-
-        """
-
-        def __init__(self, name, disk_path=None, **kwargs):  # noqa: D107
-            raise ModuleNotFoundError(
-                "StateCaptureHook class is unavailable" + " since torch was not found."
-            )
+        # Store the data using a thread
+        self._threads.append(self._executor.submit(self._thread, inputs))

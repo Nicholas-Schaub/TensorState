@@ -7,16 +7,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("TensorState")
 
-# Detect cupy
-try:
-    import cupy  # noqa
-
-    has_cupy = True
-except ModuleNotFoundError:
-    has_cupy = False
-
-logger.info(f"has_cupy: {has_cupy}")
-
 from .Dependency import ElementNode, ModuleGraph, OpNode  # noqa
 from .Layers import StateCaptureHook  # noqa
 from .models import LeNet_5, mobilenet_v2  # noqa

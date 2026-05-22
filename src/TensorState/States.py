@@ -1,9 +1,23 @@
+"""State compression, decompression, and sorting primitives.
+
+The CPU bit-packing and lex-sort routines are implemented in the Cython
+extension ``_TensorState``. The GPU bit-packing path is a small pure-torch
+implementation (no custom CUDA kernel) that uses standard tensor operations
+to pack 8 bits into each uint8 byte.
+
+The previous implementation routed GPU data through CuPy with a custom
+``ElementwiseKernel`` and a CuPy ``lexsort``. CuPy has been removed; the
+GPU path now uses PyTorch tensor ops natively, and CPU sorting always uses
+the Cython ``_lex_sort`` (which is fast enough that round-tripping CPU
+data through GPU just for sorting is not worthwhile).
+"""
+
 import logging
 
 import numpy as np
+import torch
 
 import TensorState._TensorState as _ts
-from TensorState import has_cupy
 
 logging.basicConfig(
     format="%(asctime)s - %(name)-10s - %(levelname)-8s - %(message)s",
@@ -11,38 +25,34 @@ logging.basicConfig(
 )
 logger = logging.getLogger("TensorState.States")
 
-if has_cupy:
-    import cupy
 
-    # modified from cupy source
-    # https://github.com/cupy/cupy/blob/v8.1.0/cupy/_binary/packing.py#L16
-    _compress_kernel = cupy.ElementwiseKernel(
-        "raw T myarray, raw int64 myarray_size, raw int64 in_cols, raw int64 out_cols, raw int64 stride",
-        "uint8 packed",
-        """
-        long row = i / out_cols;
-        long col = (i % out_cols) * stride;
-        long k = row * in_cols + col;
-        long nvals = (col + stride - 1 < in_cols) ? stride : in_cols - col;
-        for (long j = 0; j < nvals; ++j) {
-            int bit = myarray[k+j] != 0;
-            packed |= bit << j;
-        }""",
-        "packbits_kernel",
-    )
+def _compress_states_torch(states: torch.Tensor) -> torch.Tensor:
+    """Bit-pack a 2D torch tensor of neuron states into uint8 bytes.
 
-    # modified from cupy source
-    # https://github.com/cupy/cupy/blob/v8.1.0/cupy/_binary/packing.py#L16
-    def _compress_states_cuda(states):
-        myarray = (states > 0).ravel()
-        nrows = states.shape[0]
-        ncols = (states.shape[1] + 7) // 8
-        packed_size = nrows * ncols
-        packed = cupy.zeros((packed_size,), dtype=cupy.uint8)
-        stride = min([8, states.shape[1]])
-        return _compress_kernel(
-            myarray, myarray.size, states.shape[1], ncols, stride, packed
-        ).reshape(nrows, ncols)
+    Neurons fire if their value is > 0. Each contiguous group of 8 neurons
+    along the last dimension is packed into one uint8 byte. If the number of
+    neurons is not a multiple of 8, the final byte is padded with zeros.
+
+    Args:
+        states: A 2D tensor where rows are state observations and columns
+            are neurons. Any numeric dtype; values > 0 are treated as firing.
+
+    Returns:
+        A 2D ``torch.uint8`` tensor on the same device as ``states`` with
+        shape ``(N, ceil(C / 8))``.
+    """
+    bits = (states > 0).to(torch.uint8)
+    n_rows, n_cols = bits.shape
+    pad = (-n_cols) % 8
+    if pad:
+        bits = torch.nn.functional.pad(bits, (0, pad))
+    # Reshape into groups of 8 bits and combine via shift+sum.
+    # For distinct bit positions sum is equivalent to bitwise OR, and uint8
+    # cannot overflow since the per-byte maximum is 255.
+    bits = bits.reshape(n_rows, -1, 8)
+    shifts = torch.arange(8, dtype=torch.uint8, device=bits.device)
+    packed = (bits << shifts).sum(dim=-1).to(torch.uint8)
+    return packed
 
 
 def compress_states(states):
@@ -57,13 +67,15 @@ def compress_states(states):
     neurons in the layer.
 
     Args:
-        states: A 2d array of neuron outputs as numpy.float32 or np.bool_
-            values, where columns are a particular neuron's value, and rows are
-            states.
+        states: A 2d array of neuron outputs as ``numpy.float32`` /
+            ``numpy.bool_`` values, or a ``torch.Tensor`` (on CPU or GPU).
+            Rows are state observations, columns are neurons.
 
     Returns:
         A 2d array of uint8 values, where each value is the compressed
-            representation of the state.
+        representation of the state. The return type matches the input
+        backend: ``numpy.ndarray`` for numpy input, ``torch.Tensor`` for
+        torch input.
     """
     logger.debug("compress_states")
 
@@ -76,11 +88,13 @@ def compress_states(states):
             return _ts._compress_tensor_pi8(states)
         else:
             raise TypeError("states must be numpy.float32 or numpy.bool_")
-    elif has_cupy and isinstance(states, cupy.ndarray):
-        logger.debug("compress_states: _compress_states_cuda")
-        return _compress_states_cuda(states)
+    elif isinstance(states, torch.Tensor):
+        logger.debug("compress_states: _compress_states_torch")
+        return _compress_states_torch(states)
     else:
-        raise TypeError("states must be a numpy.ndarray")
+        raise TypeError(
+            "states must be a numpy.ndarray (float32 or bool_) or a torch.Tensor"
+        )
 
 
 def sort_states(states, state_count):
@@ -92,32 +106,24 @@ def sort_states(states, state_count):
     time consuming, and usually not useful. What is returned is a sorted index
     and the location of unique states in the sorted index.
 
+    The CPU Cython lex-sort is used regardless of where the data originated.
+    Sorting via GPU is not worth the round-trip cost for the buffer sizes
+    typical of state capture workflows.
+
     Args:
-        states: A 2d array of compressed states. See ``compress_states``
-            function.
+        states: A 2d array of compressed states (numpy or torch). See
+            ``compress_states`` function.
         state_count: The number of states (or number of rows to sort).
 
     Returns:
         A tuple containing bin edges, or locations of unique states, and a
-            sorted index, which can be used to sort the input states using
-            ``states[index]``
+        sorted index, which can be used to sort the input states using
+        ``states[index]``.
     """
-    logger.debug("sort_states")
-    if has_cupy:
-        logger.debug("sort_states: cupy.lexsort")
-        states = cupy.asarray(states[:state_count]).T
-        index = cupy.lexsort(states)
-        states = states[:, index]
-        uniques = cupy.argwhere(cupy.any(states[:, :-1] != states[:, 1:], axis=0)) + 1
-        bin_edges = cupy.zeros((uniques.size + 2,), dtype=np.int64)
-        bin_edges[1:-1] = uniques.squeeze()
-        bin_edges[-1] = states.shape[1]
-        bin_edges = cupy.asnumpy(bin_edges)
-        index = cupy.asnumpy(index)
-    else:
-        logger.debug("sort_states: tensorstate._lex_sort")
-        bin_edges, index = _ts._lex_sort(states, state_count)
-
+    logger.debug("sort_states: tensorstate._lex_sort")
+    if isinstance(states, torch.Tensor):
+        states = states.detach().cpu().numpy()
+    bin_edges, index = _ts._lex_sort(states, state_count)
     return bin_edges, index
 
 

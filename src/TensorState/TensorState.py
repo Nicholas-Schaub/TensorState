@@ -247,8 +247,8 @@ def build_efficiency_model(
             ['before','after','both']. Defaults to 'after'.
         storage_path: Path on disk to store states in zarr format. If None,
             states are stored in memory. Defaults to None.
-        memory_device: "cpu" or "gpu". When "gpu" and cupy is installed, the
-            state cache is held on GPU before transferring to main memory.
+        memory_device: "cpu" or "gpu". When "gpu" and torch.cuda is available,
+            the state cache is held on GPU before transferring to main memory.
 
     Returns:
         model: The same model with state-capture hooks attached.

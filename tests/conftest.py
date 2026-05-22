@@ -48,7 +48,8 @@ torch_models = [
 
 compress_backend = [
     pytest.param("numpy", marks=pytest.mark.use_cpu),
-    pytest.param("cupy", marks=pytest.mark.use_gpu),
+    pytest.param("torch", marks=pytest.mark.use_cpu),
+    pytest.param("torch_cuda", marks=pytest.mark.use_gpu),
 ]
 
 decompress_backend = ["numpy"]

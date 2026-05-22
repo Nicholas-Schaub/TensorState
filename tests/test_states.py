@@ -1,32 +1,32 @@
 import numpy as np
 import pytest
+import torch
 
 from TensorState import States
 
-try:
-    import cupy
 
-    HAS_CUPY = True
-except ImportError:
-    cupy = None
-    HAS_CUPY = False
+def _make_input(compression, num_neurons):
+    """Build the test input for the requested backend."""
+    a = (np.random.rand(10000, num_neurons) - 0.5).astype(np.float32)
+    if compression == "numpy":
+        return a, a
+    if compression == "torch":
+        return a, torch.from_numpy(a)
+    if compression == "torch_cuda":
+        if not torch.cuda.is_available():
+            pytest.skip("torch.cuda not available")
+        return a, torch.from_numpy(a).cuda()
+    raise ValueError(f"Unknown compression backend: {compression}")
 
 
 @pytest.mark.parametrize("num_neurons", list(2**n for n in range(10, 16)))
 def test_roundtrip(num_neurons, compression):
-    if compression == "cupy" and not HAS_CUPY:
-        pytest.skip("cupy is not installed")
-    a = (np.random.rand(10000, num_neurons) - 0.5).astype(np.float32)
-
-    if compression == "cupy":
-        b = cupy.asarray(a)
-    else:
-        b = a
-
+    """Bit-pack then decompress; the result must match the > 0 mask of the input."""
+    a, b = _make_input(compression, num_neurons)
     compressed = States.compress_states(b)
 
-    if compression == "cupy":
-        compressed = compressed.get()
+    if isinstance(compressed, torch.Tensor):
+        compressed = compressed.cpu().numpy()
 
     decompressed = States.decompress_states(compressed, num_neurons=num_neurons)
 
@@ -35,15 +35,8 @@ def test_roundtrip(num_neurons, compression):
 
 @pytest.mark.parametrize("num_neurons", list(2**n for n in range(10, 16)))
 def test_benchmark_compress(num_neurons, compression, benchmark):
-    if compression == "cupy" and not HAS_CUPY:
-        pytest.skip("cupy is not installed")
-    a = (np.random.rand(10000, num_neurons) - 0.5).astype(np.float32)
-
-    if compression == "cupy":
-        b = cupy.asarray(a)
-    else:
-        b = a
-
+    """Benchmark compress_states for the requested backend."""
+    _, b = _make_input(compression, num_neurons)
     benchmark(States.compress_states, b)
 
 
