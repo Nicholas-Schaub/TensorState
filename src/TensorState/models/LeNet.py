@@ -1,7 +1,10 @@
+import logging
 from typing import List, Tuple, Union
 
 import torch
 import torchvision
+
+logger = logging.getLogger(__name__)
 
 
 class LeNet_5(torch.nn.Module):
