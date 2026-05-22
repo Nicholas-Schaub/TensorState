@@ -24,9 +24,9 @@ be installed.
 Simple Installation
 -------------------
 
-Precompiled wheels exist for Windows 10, Linux, and MacOS for Python versions 
-3.6 to 3.9. No special dependencies are required, but it is assumed that either
-TensorFlow >= 2.2 and PyTorch >= 1.6 has already been installed.
+Precompiled wheels exist for Windows 10, Linux, and MacOS for Python 3.10+.
+No special dependencies are required, but it is assumed that PyTorch >= 2.10
+has already been installed.
 
 ``pip install TensorState``
 
@@ -72,10 +72,10 @@ or
 
 ``pip install .``
 
-Since ``TensorState`` is designed to work with both PyTorch and Tensorflow,
-neither of these packages are required for installation, but you will need to
-install both to run all of the examples. See the PyTorch installation
-instructions and tensorflow installation instructions to install each package.
+``TensorState`` is designed to work with PyTorch (including Lightning).
+PyTorch is not strictly required for installation of TensorState itself, but
+is required to use the state-capture hooks and run the examples. See the
+PyTorch installation instructions to install PyTorch.
 
 -----------------
 Other Information

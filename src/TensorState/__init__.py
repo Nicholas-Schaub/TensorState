@@ -17,28 +17,8 @@ except ModuleNotFoundError:
 
 logger.info(f"has_cupy: {has_cupy}")
 
-# Detect PyTorch
-try:
-    pass
-
-    has_torch = True
-except ModuleNotFoundError:
-    has_torch = False
-
-logger.info(f"has_torch: {has_torch}")
-
-# Detect Tensorflow
-try:
-    pass
-
-    has_tf = True
-except ModuleNotFoundError:
-    has_tf = False
-
-logger.info(f"has_tf: {has_tf}")
-
 from .Dependency import ElementNode, ModuleGraph, OpNode  # noqa
-from .Layers import StateCapture, StateCaptureHook  # noqa
+from .Layers import StateCaptureHook  # noqa
 from .models import LeNet_5, mobilenet_v2  # noqa
 from .States import compress_states, decompress_states, sort_states  # noqa
 from .TensorState import (  # noqa
@@ -47,6 +27,7 @@ from .TensorState import (  # noqa
     entropy,
     network_efficiency,
     reset_efficiency_model,
+    zero_info,
 )
 
-__version__ = "0.4.0"
+__version__ = "0.5.0-dev1"

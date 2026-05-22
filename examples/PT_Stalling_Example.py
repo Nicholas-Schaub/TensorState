@@ -83,7 +83,7 @@ class LeNet5(nn.Module):
         return x.view(-1, x.size(1))
 
 
-# Create the Keras model, attach efficiency layers
+# Create the PyTorch model, attach efficiency layers
 model = LeNet5().to(dev)
 model.eval()
 model = ts.build_efficiency_model(model, attach_to=["Conv2d"], method="after")

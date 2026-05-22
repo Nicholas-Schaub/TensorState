@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Type, Union
 import torch
 import torchvision
 from grandalf.graphs import Edge, Graph, Vertex, graph_core
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 module_io = Union[torch.Tensor, Tuple[torch.Tensor, ...]]
 
@@ -17,11 +17,10 @@ class NodeError(Exception):
 
 
 class GradientData(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     name: str
     grad_fn: torch.autograd.graph.Node
-
-    class Config:
-        arbitrary_types_allowed = True
 
 
 class ModuleData(GradientData):
@@ -40,10 +39,10 @@ class ElementNode(Vertex):
         if len(self._module_type) > 0:
             success = False
             for mtype in self._module_type:
-                if isinstance(mtype, str) and mtype in data.grad_fn.name().lower():
-                    success = True
-                    break
-
+                if isinstance(mtype, str):
+                    if mtype in data.grad_fn.name().lower():
+                        success = True
+                        break
                 elif isinstance(data, ModuleData) and isinstance(data.module, mtype):
                     success = True
                     break

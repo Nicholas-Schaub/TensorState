@@ -204,7 +204,7 @@ cdef void __compress_tensor_ps(const float[:,:] input,
         col_floor = col_shift//8
         value_truncate = 0
         for i in range(shift):
-            value_truncate += 2**i
+            value_truncate += 1 << i
 
         for row in range(rows):
             substate = _mm256_loadu_ps(&input[row,col_shift])
@@ -256,7 +256,7 @@ cdef void __compress_tensor_pi8(const unsigned char [:,:] input,
         col_floor = col_shift//8
         value_truncate = 0
         for i in range(shift):
-            value_truncate += 2**i
+            value_truncate += 1 << i
 
         for row in range(rows):
             substate = _pext_u64(cython.operator.dereference(<unsigned long long *> &input[row,col_shift]),magic)

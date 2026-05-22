@@ -75,7 +75,7 @@ class LeNet5(nn.Module):
         return x.view(-1, x.size(1))
 
 
-# Create the Keras model
+# Create the PyTorch model
 model = LeNet5().to(dev)
 
 """ Train the model, or load model if it already exists """

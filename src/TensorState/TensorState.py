@@ -1,20 +1,17 @@
 import logging
-import os
 from collections import OrderedDict
 from typing import Union
 
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"  # noqa: E402
+import numpy as np
 
-import numpy as np  # noqa: E402
-
-from TensorState.Layers import StateCapture, StateCaptureHook  # noqa: E402
+from TensorState.Layers import StateCaptureHook
 
 logging.basicConfig(
     format="%(asctime)s - %(name)-10s - %(levelname)-8s - %(message)s",
     datefmt="%d-%b-%y %H:%M:%S",
 )
 logger = logging.getLogger("TensorState")
-# logger.setLevel(logging.WARNING)
+logger.setLevel(logging.WARNING)
 
 
 def zero_info(states):
@@ -72,16 +69,18 @@ def network_efficiency(efficiencies):
     geometric mean of the efficiency values calculated for the network.
 
     Args:
-        efficiencies: A list of efficiency values (floats), a ``keras.Model``,
-            or a PyTorch/Lightning module.
+        efficiencies: A list of efficiency values (floats), or a PyTorch /
+            Lightning module with attached state-capture hooks.
 
     Returns:
         The network efficiency
     """
-    # Get the efficiency values for the keras model
+    # Extract efficiency values from a model with attached hooks
     if hasattr(efficiencies, "efficiency_layers"):
         efficiencies = [eff.efficiency() for eff in efficiencies.efficiency_layers]
-    assert isinstance(efficiencies, list), "Input must be list or keras.Model"
+    assert isinstance(
+        efficiencies, list
+    ), "Input must be a list or a module with attached state-capture hooks"
 
     # If the length of efficiencies is 0, return None and warn the user
     if len(efficiencies) == 0:
@@ -221,85 +220,6 @@ def _pt_efficiency_model(
     return model
 
 
-def _tf_efficiency_model(
-    model, attach_to, exclude, method, storage_path, memory_device
-):
-    import tensorflow.keras as keras
-
-    # Auxiliary dictionary to describe the network graph
-    network_dict = {"input_layers_of": {}, "new_output_tensor_of": {}}
-
-    # Set the input layers of each layer
-    for layer in model.layers:
-        for node in layer._outbound_nodes:
-            layer_name = node.outbound_layer.name
-            if layer_name not in network_dict["input_layers_of"]:
-                network_dict["input_layers_of"].update({layer_name: [layer.name]})
-            else:
-                network_dict["input_layers_of"][layer_name].append(layer.name)
-
-    # Set the output tensor of the input layer
-    network_dict["new_output_tensor_of"].update({model.layers[0].name: model.input})
-
-    # Iterate over all layers after the input
-    model_outputs = []
-    efficiency_layers = []
-    for layer in model.layers[1:]:
-        # Determine input tensorss
-        layer_input = [
-            network_dict["new_output_tensor_of"][layer_aux]
-            for layer_aux in network_dict["input_layers_of"][layer.name]
-        ]
-        if len(layer_input) == 1:
-            layer_input = layer_input[0]
-
-        # Add layer before if requested
-        if (
-            method in ["before", "both"]
-            and (layer.__class__.__name__ in attach_to or layer.name in attach_to)
-            and (layer.__class__.__name__ not in exclude or layer.name in exclude)
-        ):
-            efficiency_layer = StateCapture(
-                name=network_dict["input_layers_of"][layer.name][0] + "_pre_states",
-                disk_path=storage_path,
-            )
-            efficiency_layers.append(efficiency_layer)
-            layer_input = efficiency_layer(layer_input)
-
-            network_dict["new_output_tensor_of"].update(
-                {network_dict["input_layers_of"][layer.name][0]: layer_input}
-            )
-
-        # Process layer
-        x = layer(layer_input)
-
-        # Add layer after if requested
-        if (
-            method in ["after", "both"]
-            and (layer.__class__.__name__ in attach_to or layer.name in attach_to)
-            and (layer.__class__.__name__ not in exclude and layer.name not in exclude)
-        ):
-            efficiency_layer = StateCapture(
-                name=layer.name + "_post_states", disk_path=storage_path
-            )
-            efficiency_layers.append(efficiency_layer)
-            x = efficiency_layer(x)
-
-        network_dict["new_output_tensor_of"].update({layer.name: x})
-
-        # Save tensor in output list if it is output in initial model
-        if layer.name in model.output_names:
-            model_outputs.append(x)
-
-    new_model = keras.Model(inputs=model.inputs, outputs=model_outputs)
-    new_model._is_graph_network = True
-    new_model._init_graph_network(inputs=model.inputs, outputs=model_outputs)
-    new_model._run_eagerly = True
-    new_model.efficiency_layers = efficiency_layers
-
-    return new_model
-
-
 def build_efficiency_model(
     model,
     attach_to,
@@ -310,20 +230,12 @@ def build_efficiency_model(
 ):
     """Attach state capture methods to a neural network.
 
-    This method takes an existing neural network model and attaches either
-    layers or hooks to the model to capture the states of neural network layers.
-
-    For Tensorflow, only keras.Model networks can serve as inputs to this
-    function. When a Tensorflow model is fed into this function, a new network
-    is returned where StateCapture layers are inserted into the network at the
-    designated locations.
-
-    For PyTorch, a neural network that implements the Module class will have
-    hooks added to the layers. A new network is not generated, but for
-    consistency the model is returned from this function.
+    This method takes an existing PyTorch model and attaches forward hooks
+    to capture the firing states of neural network layers. The model is
+    modified in place (hooks attached) and returned for convenience.
 
     Args:
-        model: A Keras model
+        model: A PyTorch ``nn.Module`` or Lightning ``LightningModule``.
         attach_to: List of strings indicating the types of layers to attach to.
             Names of layers can also be specified to attach StateCapture to
             specific layers
@@ -335,9 +247,11 @@ def build_efficiency_model(
             ['before','after','both']. Defaults to 'after'.
         storage_path: Path on disk to store states in zarr format. If None,
             states are stored in memory. Defaults to None.
+        memory_device: "cpu" or "gpu". When "gpu" and cupy is installed, the
+            state cache is held on GPU before transferring to main memory.
 
     Returns:
-        model: A model of the same type as the input model
+        model: The same model with state-capture hooks attached.
     """
     class_module = {cls.__module__: cls.__name__ for cls in model.__class__.__bases__}
 
@@ -353,16 +267,17 @@ def build_efficiency_model(
         exclude = [exclude]
     assert isinstance(exclude, list)
 
-    if class_module.get("tensorflow.python.keras.engine.network") == "Network":
-        new_model = _tf_efficiency_model(
-            model, attach_to, exclude, method, storage_path, memory_device
-        )
-    elif (
+    if (
         class_module.get("torch.nn.modules.module") == "Module"
         or class_module.get("lightning.pytorch.core.module") == "LightningModule"
     ):
         new_model = _pt_efficiency_model(
             model, attach_to, exclude, method, storage_path, memory_device
+        )
+    else:
+        raise TypeError(
+            "build_efficiency_model only supports PyTorch nn.Module and "
+            "Lightning LightningModule instances."
         )
 
     return new_model

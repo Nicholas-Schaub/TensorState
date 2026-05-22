@@ -28,10 +28,8 @@ class AbstractStateCapture(abc.ABC):
     """Base class for capturing state space information in a neural network.
 
     This class implements the infrastructure used to capture, quantize, and
-    process state space information. For Tensorflow, a subclass is constructed
-    to inherit these methods as a layer to be inserted into the network. For
-    PyTorch, a subclass is constructed to implement these methods as layer
-    hooks.
+    process state space information. A PyTorch subclass implements these
+    methods as forward hooks.
 
     This class captures state information and quantizes layer outputs as firing
     or not firing based on whether the values are >0 or <=0 respectively.
@@ -47,8 +45,8 @@ class AbstractStateCapture(abc.ABC):
     data can be stored on disk to reduce memory consumption by using the
     disk_path keyword.
 
-    NOTE: This layer currently only works within Tensorflow Keras models,
-    PyTorch models, and pytorch lightning models.
+    NOTE: This layer currently works with PyTorch ``nn.Module`` and Lightning
+    ``LightningModule`` instances.
 
     """
 
@@ -248,7 +246,7 @@ class AbstractStateCapture(abc.ABC):
 
     def states_per_instance(self):
         """Average number of states per input instance."""
-        # TODO: Verify this is correct for Tensorflow and PyTorch
+        # TODO: Verify this is correct for PyTorch
         num_states = (
             np.prod(self._input_shape[1:]) / self._input_shape[self._channel_index]
         )
@@ -480,89 +478,6 @@ class AbstractStateCapture(abc.ABC):
 
 
 try:
-    import tensorflow.keras as keras
-    from tensorflow.experimental.dlpack import to_dlpack
-
-    class StateCapture(keras.layers.Layer, AbstractStateCapture):
-        """Tensorflow keras layer to capture states in keras models.
-
-        This class is designed to be used in a Tensorflow keras model to
-        automate the capturing of neurons states as data is passed through the
-        network.
-        """
-
-        def __init__(self, name, disk_path=None, memory_device="cpu", **kwargs):
-            """Initialize a state capture layer.
-
-            Args:
-                name: The name of the layer
-                disk_path: If specified, data will be stored on disk in a zarr
-                    file rather than in memory This is useful for large networks
-                    or when running on large data sets. Defaults to None.
-            """
-            # Use both parent class initializers
-            keras.layers.Layer.__init__(self, name=name, **kwargs)
-            AbstractStateCapture.__init__(
-                self, name, disk_path=disk_path, memory_device=memory_device, **kwargs
-            )
-
-        def call(self, inputs):
-            """Process layer states.
-
-            Args:
-                inputs: The tensor used to get states.
-
-            Returns:
-                The input tensor, to pass information to subsequent layers.
-            """
-            if inputs.shape[0] is None:
-                return inputs
-
-            if not self.capture_on:
-                return inputs
-
-            if has_cupy and "GPU" in inputs.device:
-                capsule = to_dlpack(inputs)
-                states = cupy.fromDlpack(capsule)
-            else:
-                states = inputs
-
-            self._threads.append(
-                self._executor.submit(self._compress_and_store, states)
-            )
-
-            return inputs
-
-        def build(self, input_shape):
-            """Build the StateCapture Keras Layer.
-
-            This method initializes the layer and resets any previously held
-            data. The zarr array is initialized in this method.
-
-            Args:
-                input_shape (TensorShape): Either a TensorShape or list of
-                    TensorShape instances.
-            """
-            self.reset_states(input_shape)
-
-except ModuleNotFoundError:
-
-    class StateCapture(AbstractStateCapture):  # type: ignore
-        """Tensorflow keras layer to capture states in keras models.
-
-        This class is designed to be used in a Tensorflow keras model to
-        automate the capturing of neurons states as data is passed through the
-        network.
-
-        """
-
-        def __init__(self, name, disk_path=None, **kwargs):  # noqa: D107
-            raise ModuleNotFoundError(
-                "StateCapture class is unavailable since" + " tensorflow was not found."
-            )
-
-
-try:
     import torch
 
     class StateCaptureHook(AbstractStateCapture):
@@ -596,7 +511,7 @@ try:
             if not self.capture_on:
                 return
 
-            # Transform the tensor to have similar memory format as Tensorflow
+            # Transform the tensor to channels-last memory layout (NHWC)
             dim_order = (0,) + tuple(i for i in range(2, args[-1].ndim)) + (1,)
             inputs = args[-1].detach().permute(*dim_order).contiguous()
 

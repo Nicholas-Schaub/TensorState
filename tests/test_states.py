@@ -1,12 +1,21 @@
-import cupy
 import numpy as np
 import pytest
 
 from TensorState import States
 
+try:
+    import cupy
+
+    HAS_CUPY = True
+except ImportError:
+    cupy = None
+    HAS_CUPY = False
+
 
 @pytest.mark.parametrize("num_neurons", list(2**n for n in range(10, 16)))
 def test_roundtrip(num_neurons, compression):
+    if compression == "cupy" and not HAS_CUPY:
+        pytest.skip("cupy is not installed")
     a = (np.random.rand(10000, num_neurons) - 0.5).astype(np.float32)
 
     if compression == "cupy":
@@ -26,6 +35,8 @@ def test_roundtrip(num_neurons, compression):
 
 @pytest.mark.parametrize("num_neurons", list(2**n for n in range(10, 16)))
 def test_benchmark_compress(num_neurons, compression, benchmark):
+    if compression == "cupy" and not HAS_CUPY:
+        pytest.skip("cupy is not installed")
     a = (np.random.rand(10000, num_neurons) - 0.5).astype(np.float32)
 
     if compression == "cupy":

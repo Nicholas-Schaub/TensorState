@@ -55,7 +55,7 @@ html_sidebars = {
 }
 
 # Mock imports to autobuild
-autodoc_mock_imports = ["zarr", "TensorState._TensorState", "tensorflow.keras", "torch"]
+autodoc_mock_imports = ["zarr", "TensorState._TensorState", "torch"]
 
 # Set the master doc
 master_doc = "index"
