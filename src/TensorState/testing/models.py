@@ -1,8 +1,8 @@
 """Small canonical reference models for tests, examples, and benchmarks.
 
-Each architecture is sized to train on :func:`~TensorState.testing.synthetic.tiny_dataset`
-(or ``tiny_text_dataset``) in seconds on CPU. They exist to give the
-capture and apoptosis machinery concrete, lightweight targets:
+Each architecture is sized to train on the synthetic ``tiny_dataset`` /
+``tiny_text_dataset`` in seconds on CPU. They exist to give the capture
+and apoptosis machinery concrete, lightweight targets:
 
 - ``lenet5`` — the existing LeNet-5 variant (Conv + BatchNorm chain).
 - ``mlp`` — a plain Linear stack.

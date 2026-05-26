@@ -4,12 +4,12 @@ import numpy as np
 import pytest
 import torch
 
-from TensorState import testing as T
+from TensorState import testing as tst
 
 
 def test_tiny_dataset_deterministic_and_shape():
-    d1 = T.tiny_dataset(n=32, channels=3, size=8, num_classes=5, seed=1)
-    d2 = T.tiny_dataset(n=32, channels=3, size=8, num_classes=5, seed=1)
+    d1 = tst.tiny_dataset(n=32, channels=3, size=8, num_classes=5, seed=1)
+    d2 = tst.tiny_dataset(n=32, channels=3, size=8, num_classes=5, seed=1)
     assert len(d1) == 32
     x1, y1 = d1[0]
     x2, y2 = d2[0]
@@ -24,13 +24,13 @@ def test_tiny_dataset_deterministic_and_shape():
 
 
 def test_tiny_dataset_seed_changes_output():
-    a = T.tiny_dataset(n=8, seed=0)[0][0]
-    b = T.tiny_dataset(n=8, seed=1)[0][0]
+    a = tst.tiny_dataset(n=8, seed=0)[0][0]
+    b = tst.tiny_dataset(n=8, seed=1)[0][0]
     assert not torch.equal(a, b)
 
 
 def test_tiny_text_dataset_shapes():
-    d = T.tiny_text_dataset(n=16, seq_len=12, vocab_size=32, num_classes=3, seed=0)
+    d = tst.tiny_text_dataset(n=16, seq_len=12, vocab_size=32, num_classes=3, seed=0)
     assert len(d) == 16
     inp, tgt = d[0]
     assert inp.shape == (11,)
@@ -40,14 +40,14 @@ def test_tiny_text_dataset_shapes():
 
 
 def test_tiny_loader_batches():
-    loader = T.tiny_loader(batch_size=8, n=24, size=8)
+    loader = tst.tiny_loader(batch_size=8, n=24, size=8)
     xb, yb = next(iter(loader))
     assert xb.shape == (8, 3, 8, 8)
     assert yb.shape == (8,)
 
 
 def test_random_states_density_and_dtype():
-    s = T.random_states(n=2000, neurons=16, density=0.3, seed=0)
+    s = tst.random_states(n=2000, neurons=16, density=0.3, seed=0)
     assert s.shape == (2000, 16)
     assert s.dtype == torch.bool
     # Empirical density should land near the requested density.
@@ -55,8 +55,8 @@ def test_random_states_density_and_dtype():
 
 
 def test_random_states_deterministic():
-    a = T.random_states(seed=7)
-    b = T.random_states(seed=7)
+    a = tst.random_states(seed=7)
+    b = tst.random_states(seed=7)
     assert torch.equal(a, b)
 
 
@@ -70,7 +70,7 @@ def test_random_states_deterministic():
     ],
 )
 def test_degenerate_states(kind, expected_unique):
-    s = T.degenerate_states(kind, n=20, neurons=17)
+    s = tst.degenerate_states(kind, n=20, neurons=17)
     assert s.shape == (20, 17)
     assert s.dtype == torch.bool
     unique = {tuple(row) for row in s.tolist()}
@@ -79,14 +79,14 @@ def test_degenerate_states(kind, expected_unique):
 
 def test_degenerate_states_rejects_unknown():
     with pytest.raises(ValueError, match="unknown degenerate-state kind"):
-        T.degenerate_states("nonsense")
+        tst.degenerate_states("nonsense")
 
 
 def test_seed_all_reproducible():
-    T.seed_all(123)
+    tst.seed_all(123)
     a = torch.randn(4)
     n_a = np.random.rand(4)
-    T.seed_all(123)
+    tst.seed_all(123)
     b = torch.randn(4)
     n_b = np.random.rand(4)
     assert torch.equal(a, b)
@@ -95,8 +95,8 @@ def test_seed_all_reproducible():
 
 @pytest.mark.parametrize("arch", ["mlp", "groupnorm_conv"])
 def test_small_model_vision_forward(arch):
-    model = T.small_model(arch, in_channels=3, num_classes=7)
-    x = T.tiny_dataset(n=8, channels=3, size=8)[:][0]
+    model = tst.small_model(arch, in_channels=3, num_classes=7)
+    x = tst.tiny_dataset(n=8, channels=3, size=8)[:][0]
     out = model(x)
     assert out.shape == (8, 7)
 
@@ -104,15 +104,15 @@ def test_small_model_vision_forward(arch):
 def test_small_model_lenet5_forward():
     # LeNet-5's conv/pool stack needs a larger spatial input than the 8x8
     # default; 64x64 matches its design size.
-    model = T.small_model("lenet5", num_classes=10)
-    x = T.tiny_dataset(n=4, channels=3, size=64)[:][0]
+    model = tst.small_model("lenet5", num_classes=10)
+    x = tst.tiny_dataset(n=4, channels=3, size=64)[:][0]
     out = model(x)
     assert out.shape[0] == 4
 
 
 def test_small_model_transformer_forward():
-    model = T.small_model("tiny_transformer", vocab_size=32, max_len=16)
-    d = T.tiny_text_dataset(n=4, seq_len=12, vocab_size=32)
+    model = tst.small_model("tiny_transformer", vocab_size=32, max_len=16)
+    d = tst.tiny_text_dataset(n=4, seq_len=12, vocab_size=32)
     inp = torch.stack([d[i][0] for i in range(4)])
     out = model(inp)
     assert out.shape == (4, 11, 32)
@@ -120,4 +120,4 @@ def test_small_model_transformer_forward():
 
 def test_small_model_rejects_unknown():
     with pytest.raises(ValueError, match="unknown arch"):
-        T.small_model("nonsense")
+        tst.small_model("nonsense")

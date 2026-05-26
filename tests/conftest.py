@@ -8,15 +8,18 @@ import torchvision.datasets as datasets
 from torchvision.transforms import Compose, Resize, ToTensor
 
 import TensorState as ts  # noqa: N813 -- deliberate package alias
+from TensorState import testing as ts_testing
 
 torch_data = [
-    "MNIST",
+    # Default: synthetic, no download, LeNet5/AlexNet-compatible at 64x64.
+    "tiny",
+    pytest.param("MNIST", marks=pytest.mark.all_data),
     pytest.param("KMNIST", marks=pytest.mark.all_data),
     pytest.param("QMNIST", marks=pytest.mark.all_data),
     pytest.param("EMNIST", marks=pytest.mark.all_data),
     pytest.param("FashionMNIST", marks=pytest.mark.all_data),
     pytest.param("CIFAR10", marks=pytest.mark.all_data),
-    "CIFAR100",
+    pytest.param("CIFAR100", marks=pytest.mark.all_data),
 ]
 
 
@@ -72,9 +75,34 @@ def decompression(request):
     return request.param
 
 
+def _tiny_loaders(num_classes=10):
+    """Synthetic, download-free train/test loaders for the default path.
+
+    Uses 64x64 images so the same loaders feed LeNet5 / AlexNet (which
+    need a real spatial extent) as well as the smaller models. The
+    datasets carry a ``.classes`` attribute so tests can size model heads
+    via ``len(test.dataset.classes)`` exactly as they do for torchvision
+    datasets.
+    """
+    train_ds = ts_testing.tiny_dataset(
+        n=256, channels=3, size=64, num_classes=num_classes, seed=0
+    )
+    test_ds = ts_testing.tiny_dataset(
+        n=64, channels=3, size=64, num_classes=num_classes, seed=1
+    )
+    train_ds.classes = list(range(num_classes))
+    test_ds.classes = list(range(num_classes))
+    train_dl = torch.utils.data.DataLoader(train_ds, batch_size=64)
+    test_dl = torch.utils.data.DataLoader(test_ds, batch_size=64)
+    return train_dl, test_dl
+
+
 @pytest.fixture(scope="module", params=torch_data)
 def data(request):
     name = request.param
+
+    if name == "tiny":
+        return _tiny_loaders()
 
     """Create the data sets"""
     kwargs = {}

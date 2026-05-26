@@ -7,10 +7,14 @@ without importing anything.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
-import torch
 
 from TensorState.testing import synthetic
+
+if TYPE_CHECKING:
+    import torch
 
 
 @pytest.fixture
