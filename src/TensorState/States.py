@@ -45,6 +45,31 @@ logging.basicConfig(
 logger = logging.getLogger("TensorState.States")
 
 
+def _check_extension_functional() -> bool:
+    """Smoke-test the CPU extension once at import time.
+
+    Compresses a known float32 input and verifies the packed output. Guards
+    against an importable-but-broken extension (e.g., a stale build or an
+    ABI/signature mismatch). The result gates whether CPU torch tensors are
+    routed through the extension or the slower torch-native fallback.
+    """
+    try:
+        # Neurons 0 and 2 fire -> bit 0 and bit 2 set -> 0b00000101 = 5.
+        probe = np.array([[1.0, -1.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0]], dtype=np.float32)
+        packed = _ts._compress_tensor_ps(probe)
+        return tuple(packed.shape) == (1, 1) and int(packed[0, 0]) == 5
+    except Exception:  # noqa: BLE001 -- any failure means "not functional"
+        logger.warning(
+            "CPU extension smoke test failed; CPU torch tensors will use the "
+            "slower torch-native bit-pack fallback.",
+            exc_info=True,
+        )
+        return False
+
+
+_EXTENSION_FUNCTIONAL = _check_extension_functional()
+
+
 @triton.jit
 def _packbits_kernel_fused(
     input_ptr,
@@ -188,9 +213,22 @@ def _compress_states_torch_cpu(states: torch.Tensor) -> torch.Tensor:
 
 
 def _compress_states_torch(states: torch.Tensor) -> torch.Tensor:
-    """Dispatch to Triton (CUDA) or native torch (CPU) bit-packing."""
+    """Dispatch a torch tensor to the fastest available bit-pack path.
+
+    - CUDA tensor: the Triton kernel.
+    - CPU tensor, extension functional: threshold in torch (uniform across
+      dtypes), then pack via the Rust/Cython extension (much faster than
+      torch-native packing — see the AIQ-32 benchmarks).
+    - CPU tensor, extension broken/missing: the torch-native fallback.
+    """
     if states.is_cuda:
         return _compress_states_triton(states)
+    if _EXTENSION_FUNCTIONAL:
+        # `> 0` works for any numeric dtype; `.to(uint8)` makes a contiguous
+        # 0/1 array the extension's pi8 path accepts. `.numpy()` is zero-copy
+        # for a contiguous CPU tensor.
+        bits = (states > 0).to(torch.uint8).detach().cpu().numpy()
+        return torch.from_numpy(_ts._compress_tensor_pi8(bits))
     return _compress_states_torch_cpu(states)
 
 

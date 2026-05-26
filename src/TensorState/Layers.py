@@ -102,9 +102,15 @@ class AbstractStateCapture(abc.ABC):
     _channel_index = -1
     _state_cache = None
     _state_cache_index = 0
+    _gpu_buffer_mb: float = 256.0
 
     def __init__(
-        self, name, disk_path=None, memory_device: str | int = "cpu", **kwargs
+        self,
+        name,
+        disk_path=None,
+        memory_device: str | int | None = None,
+        gpu_buffer_size: float = 256.0,
+        **kwargs,
     ):
         """Abstract State Capture Layer.
 
@@ -112,10 +118,17 @@ class AbstractStateCapture(abc.ABC):
             name: Name of the state capture layer.
             disk_path: Path on disk to save captured states in zarr format.
                 Defaults to None.
-            memory_device: This should be either "cpu" or "gpu". When set to
-                "gpu" and a CUDA-capable PyTorch is available, captured states
-                are accumulated in a GPU-resident cache before being flushed
-                to main memory in batches.
+            memory_device: ``"cpu"``, ``"gpu"``, or a CUDA device index. When
+                set to ``"gpu"`` (or an int) and a CUDA-capable PyTorch is
+                available, captured states are accumulated in a GPU-resident
+                cache before being flushed to main memory in batches. When
+                ``None`` (the default), resolves to ``"gpu"`` if CUDA is
+                available, otherwise ``"cpu"``.
+            gpu_buffer_size: Size of the GPU-resident compressed-state buffer,
+                in megabytes. Larger buffers mean fewer device-to-host
+                transfers at the cost of more VRAM. Independent of the zarr
+                on-disk chunk size. Defaults to 256 MB. Ignored when
+                ``memory_device`` resolves to ``"cpu"``.
             **kwargs: Keyword arguments. Used for passing arguments to other
                 classes that inherit from AbstractStateCapture.
         """
@@ -137,6 +150,17 @@ class AbstractStateCapture(abc.ABC):
             self._zarr_path = self._zarr_path.joinpath(name + ".zarr")
             self._zarr_path.mkdir(exist_ok=False)
 
+        # Default the memory device based on CUDA availability when the caller
+        # did not specify one.
+        if memory_device is None:
+            memory_device = "gpu" if torch.cuda.is_available() else "cpu"
+            logger.info(
+                "StateCaptureHook: memory_device not specified; defaulting to "
+                "'%s' (torch.cuda.is_available()=%s)",
+                memory_device,
+                torch.cuda.is_available(),
+            )
+
         if memory_device == "gpu" and not torch.cuda.is_available():
             logger.warning(
                 "Memory device set to gpu, but torch.cuda is not available. "
@@ -145,7 +169,13 @@ class AbstractStateCapture(abc.ABC):
             self.memory_device = "cpu"
         else:
             self.memory_device = memory_device
-        logger.debug(f"StateCaptureHook: memory_device={self.memory_device}")
+
+        self._gpu_buffer_mb = gpu_buffer_size
+        logger.debug(
+            "StateCaptureHook: memory_device=%s, gpu_buffer_size=%.1f MB",
+            self.memory_device,
+            self._gpu_buffer_mb,
+        )
 
     def _wait_for_threads(self):
         wait(self._threads)
@@ -336,8 +366,14 @@ class AbstractStateCapture(abc.ABC):
                 device_idx = (
                     self.memory_device if isinstance(self.memory_device, int) else 0
                 )
+                # GPU buffer rows from the MB budget, floored at one zarr
+                # chunk so we never buffer less than a chunk between flushes.
+                buffer_rows = max(
+                    self._chunk_size[0],
+                    int(self._gpu_buffer_mb * 2**20 // ncols),
+                )
                 self._state_cache = torch.zeros(
-                    self._chunk_size,
+                    (buffer_rows, ncols),
                     dtype=torch.uint8,
                     device=f"cuda:{device_idx}",
                 )
