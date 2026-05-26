@@ -27,7 +27,7 @@ mod compress_u8;
 mod decompress;
 mod lex_sort;
 
-use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray1, PyReadonlyArray2};
+use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray2};
 
 /// Bit-pack a 2-D float32 array. Values > 0 become firing bits.
 #[pyfunction]
@@ -138,11 +138,16 @@ fn py_compress_tensor_pi8_avx2<'py>(
 }
 
 /// Decompress a bit-packed uint8 array back to a boolean array.
+///
+/// Accepts a 2-D `(n_rows, bytes_per_row)` input matching the output shape
+/// of `_compress_tensor_ps` / `_compress_tensor_pi8`. Internally flattens
+/// to 1-D before calling the core decompress routine (matches the
+/// Cython contract).
 #[pyfunction]
 #[pyo3(name = "_decompress_tensor")]
 fn py_decompress_tensor<'py>(
     py: Python<'py>,
-    input: PyReadonlyArray1<'py, u8>,
+    input: PyReadonlyArray2<'py, u8>,
     n_neurons: i64,
 ) -> PyResult<Bound<'py, PyArray2<bool>>> {
     if n_neurons <= 0 {
@@ -151,7 +156,14 @@ fn py_decompress_tensor<'py>(
         ));
     }
     let view = input.as_array();
-    let out = decompress::decompress(view, n_neurons as usize);
+    let flat = view
+        .to_shape(view.len())
+        .map_err(|e| {
+            pyo3::exceptions::PyValueError::new_err(format!(
+                "_decompress_tensor: cannot flatten 2-D input: {e}",
+            ))
+        })?;
+    let out = decompress::decompress(flat.view(), n_neurons as usize);
     Ok(out.into_pyarray(py))
 }
 

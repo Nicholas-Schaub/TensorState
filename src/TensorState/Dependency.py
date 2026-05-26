@@ -950,9 +950,16 @@ class GroupGraph(graph_core):
             if node in visited:
                 continue
             visited.add(node)
+            # Single-dim nodes (BatchNorm/GroupNorm/LayerNorm/Pool/Permute)
+            # alias `destroy_inputs = destroy_outputs` at class level because
+            # outputs and inputs are the same channel dim. Detect the alias
+            # so we don't double-apply the surgery on interior nodes.
+            single_dim = node.destroy_outputs.__func__ is node.destroy_inputs.__func__
+            called_outputs = False
             if node not in leaves:
                 node.destroy_outputs(indices)
-            if node not in roots:
+                called_outputs = True
+            if node not in roots and not (single_dim and called_outputs):
                 node.destroy_inputs(indices)
 
     # Back-compat alias.

@@ -82,7 +82,7 @@ def validate_decompress() -> bool:
             a = (rng.random((n_rows, n_cols)) - 0.5).astype(np.float32)
             compressed = cython_ts._compress_tensor_ps(a)
             cy = cython_ts._decompress_tensor(compressed, n_cols)
-            rs = rust_ts._decompress_tensor(compressed.flatten(), n_cols)
+            rs = rust_ts._decompress_tensor(compressed, n_cols)
             if not np.array_equal(cy, rs):
                 print(f"  MISMATCH _decompress_tensor n_rows={n_rows} n_cols={n_cols}")
                 ok = False
