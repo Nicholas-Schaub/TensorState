@@ -1,57 +1,80 @@
-# TensorState (v0.4.0) - Neural Network Efficiency Tools
+# tensorstate
 
-TensorState is a toolbox to capture neural network information to better
-understand how information flows through the network. The core of the toolbox is
-the ability to capture and analyze neural layer state space, which logs unique
-firing states of neural network layers. This repository implements and extends
-the work by Schaub and Hotaling in their paper,
-[Assessing Intelligence in Artificial Neural Networks](https://arxiv.org/abs/2006.02909).
+Neural network state-space analysis. Capture and analyze the firing-state
+distribution of neural network layers — the "microstates" defined as the
+binary firing patterns produced by each layer on each input — and use them
+to measure information-theoretic properties (Shannon entropy, layer
+efficiency) and to drive structural pruning ("apoptosis") of redundant
+neurons.
+
+Implements and extends the work in
+[Assessing Intelligence in Artificial Neural Networks](https://arxiv.org/abs/2006.02909)
+(Schaub & Hotaling, 2020).
 
 ## Installation
 
-Precompiled wheels exist for Windows, Linux, and MacOS for Python 3.6-3.8. No
-special installation instructions are required in most cases:
+```bash
+pip install tensorstate
+```
 
-`pip install pip --upgrade`
+Requires Python ≥ 3.13. Prebuilt wheels ship for Linux (x86_64), macOS
+(x86_64 and arm64), and Windows (x86_64). Other platforms install from
+sdist, which builds the Rust extension via `maturin` automatically (a Rust
+toolchain is required for the source install).
 
-`pip install TensorState`
+## Quick start
 
-If the wheels don't download or you run into an error, try installing the
-pre-requisites for compiling before installing with `pip`.
+```python
+import torch, torchvision
+import TensorState as ts
 
-`pip install pip --upgrade`
+model = torchvision.models.mobilenet_v2(num_classes=10)
+ts.build_efficiency_model(model, attach_to=["Conv2dNormActivation"])
 
-`pip install numpy==1.19.2 Cython==3.0a1`
+# Run the model. Microstates are captured per attached layer.
+for x, _ in data_loader:
+    model(x)
 
-`pip install TensorState`
+# Inspect per-layer firing entropy.
+for layer in model.efficiency_layers:
+    print(layer.name, layer.entropy())
+```
 
-## Documentation
-
-https://tensorstate.readthedocs.io/en/latest/
+The capture path uses Triton for bit-packing on CUDA and the Rust
+extension for bit-packing on CPU, so the hook overhead is small.
 
 ## Developing
 
-The project uses [uv](https://docs.astral.sh/uv/) for environment management,
-[ruff](https://docs.astral.sh/ruff/) for lint + format,
-[ty](https://docs.astral.sh/ty/) for type checking, and
+The project uses [uv](https://docs.astral.sh/uv/) for environment
+management, [maturin](https://www.maturin.rs/) for the Rust extension,
+[ruff](https://docs.astral.sh/ruff/) for lint + format, and
 [pre-commit](https://pre-commit.com/) to run them on every commit.
 
 ```bash
-# install dev dependencies (ruff, ty, pre-commit, pytest, mkdocs, ...)
+# Install dev dependencies (ruff, ty, pre-commit, pytest, mkdocs, maturin, ...)
 uv sync --group dev
 
-# install the git hook so every commit is auto-checked
+# Build the Rust extension in place
+uv run maturin develop --release
+
+# Install the git hook so every commit is auto-checked
 uv run pre-commit install
 
-# run all hooks against the whole tree (CI-equivalent)
+# Run the test suite
+uv run pytest
+
+# Run all pre-commit hooks against the whole tree
 uv run pre-commit run --all-files
 ```
 
-Individual tools are available via `uv run`:
+The legacy Cython extension is preserved in-tree for regression
+benchmarking. Build it manually with `bash scripts/build-cython.sh` —
+it is not part of CI and not loaded at runtime.
 
-```bash
-uv run ruff check .         # lint
-uv run ruff format .        # format
-uv run ty check src         # type check
-uv run pytest               # tests
-```
+## Documentation
+
+https://nicholas-schaub.github.io/TensorState/
+
+## License
+
+MIT — see `LICENSE`.
