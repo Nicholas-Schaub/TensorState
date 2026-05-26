@@ -176,3 +176,7 @@ TensorState/__pycache__
 # lives in Plane, not in the library repo. The decisions/ directory
 # is a scratchpad for proposals; nothing in it is committed.
 decisions/
+
+# MCP server configuration — contains credentials (PLANE_API_KEY,
+# PLANE_PASSWORD). Never commit.
+.mcp.json
