@@ -53,6 +53,90 @@ fn py_compress_tensor_pi8<'py>(
     Ok(out.into_pyarray(py))
 }
 
+/// Hand-tuned AVX2 version of `_compress_tensor_ps`. Requires AVX2.
+#[pyfunction]
+#[pyo3(name = "_compress_tensor_ps_simd")]
+fn py_compress_tensor_ps_simd<'py>(
+    py: Python<'py>,
+    input: PyReadonlyArray2<'py, f32>,
+) -> PyResult<Bound<'py, PyArray2<u8>>> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if !std::arch::is_x86_feature_detected!("avx2") {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "AVX2 not available on this CPU; use _compress_tensor_ps",
+            ));
+        }
+        let view = input.as_array();
+        let out = unsafe { compress_f32::compress_avx2(view) };
+        Ok(out.into_pyarray(py))
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = (py, input);
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "_compress_tensor_ps_simd is x86_64-only",
+        ))
+    }
+}
+
+/// Hand-tuned BMI2 version of `_compress_tensor_pi8`. Requires BMI2.
+/// Processes 8 input bytes -> 1 output byte per intrinsic call.
+#[pyfunction]
+#[pyo3(name = "_compress_tensor_pi8_bmi2")]
+fn py_compress_tensor_pi8_bmi2<'py>(
+    py: Python<'py>,
+    input: PyReadonlyArray2<'py, u8>,
+) -> PyResult<Bound<'py, PyArray2<u8>>> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if !std::arch::is_x86_feature_detected!("bmi2") {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "BMI2 not available on this CPU; use _compress_tensor_pi8",
+            ));
+        }
+        let view = input.as_array();
+        let out = unsafe { compress_u8::compress_bmi2(view) };
+        Ok(out.into_pyarray(py))
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = (py, input);
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "_compress_tensor_pi8_bmi2 is x86_64-only",
+        ))
+    }
+}
+
+/// Hand-tuned AVX2 version of `_compress_tensor_pi8`. Requires AVX2.
+/// Processes 32 input bytes -> 4 output bytes per intrinsic call (4x the
+/// throughput of the BMI2 path on CPUs where both are available).
+#[pyfunction]
+#[pyo3(name = "_compress_tensor_pi8_avx2")]
+fn py_compress_tensor_pi8_avx2<'py>(
+    py: Python<'py>,
+    input: PyReadonlyArray2<'py, u8>,
+) -> PyResult<Bound<'py, PyArray2<u8>>> {
+    #[cfg(target_arch = "x86_64")]
+    {
+        if !std::arch::is_x86_feature_detected!("avx2") {
+            return Err(pyo3::exceptions::PyRuntimeError::new_err(
+                "AVX2 not available on this CPU; use _compress_tensor_pi8",
+            ));
+        }
+        let view = input.as_array();
+        let out = unsafe { compress_u8::compress_avx2(view) };
+        Ok(out.into_pyarray(py))
+    }
+    #[cfg(not(target_arch = "x86_64"))]
+    {
+        let _ = (py, input);
+        Err(pyo3::exceptions::PyRuntimeError::new_err(
+            "_compress_tensor_pi8_avx2 is x86_64-only",
+        ))
+    }
+}
+
 /// Decompress a bit-packed uint8 array back to a boolean array.
 #[pyfunction]
 #[pyo3(name = "_decompress_tensor")]
@@ -106,6 +190,9 @@ fn _build_info() -> PyResult<String> {
 fn _tensorstate_rs(_py: Python<'_>, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_compress_tensor_ps, m)?)?;
     m.add_function(wrap_pyfunction!(py_compress_tensor_pi8, m)?)?;
+    m.add_function(wrap_pyfunction!(py_compress_tensor_ps_simd, m)?)?;
+    m.add_function(wrap_pyfunction!(py_compress_tensor_pi8_bmi2, m)?)?;
+    m.add_function(wrap_pyfunction!(py_compress_tensor_pi8_avx2, m)?)?;
     m.add_function(wrap_pyfunction!(py_decompress_tensor, m)?)?;
     m.add_function(wrap_pyfunction!(py_lex_sort, m)?)?;
     m.add_function(wrap_pyfunction!(_build_info, m)?)?;

@@ -114,19 +114,36 @@ def validate_lex_sort() -> bool:
 
 
 def benchmark() -> None:
-    """Print a Cython-vs-Rust performance comparison table."""
+    """Print a Cython-vs-Rust(scalar)-vs-Rust(SIMD) performance comparison."""
     sizes = [1024, 2048, 4096, 8192, 16384, 32768, 65536]
     n_rows = 10000
     rng = np.random.default_rng(46)
 
-    print(f"{'cols':>6}  {'Cython AVX':>14}  {'Rust scalar':>14}  {'Rust/Cython':>14}")
-    print("-" * 60)
+    header = (
+        f"{'cols':>6}  "
+        f"{'Cython AVX':>12}  "
+        f"{'Rust scalar':>12}  "
+        f"{'Rust SIMD':>12}  "
+        f"{'scalar/cy':>10}  "
+        f"{'simd/cy':>10}  "
+        f"{'simd/scalar':>12}"
+    )
+    print(header)
+    print("-" * len(header))
     for n_cols in sizes:
         a = (rng.random((n_rows, n_cols)) - 0.5).astype(np.float32)
         t_cy = bench(cython_ts._compress_tensor_ps, a)
         t_rs = bench(rust_ts._compress_tensor_ps, a)
-        ratio = t_rs / t_cy
-        print(f"{n_cols:>6}  {t_cy:>10.2f} ms  {t_rs:>10.2f} ms  {ratio:>10.2f}x")
+        t_si = bench(rust_ts._compress_tensor_ps_simd, a)
+        print(
+            f"{n_cols:>6}  "
+            f"{t_cy:>9.2f} ms  "
+            f"{t_rs:>9.2f} ms  "
+            f"{t_si:>9.2f} ms  "
+            f"{t_rs / t_cy:>9.2f}x  "
+            f"{t_si / t_cy:>9.2f}x  "
+            f"{t_si / t_rs:>11.2f}x"
+        )
 
 
 def main() -> int:
