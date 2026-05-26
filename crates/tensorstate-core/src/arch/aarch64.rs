@@ -2,8 +2,8 @@
 //! NEON intrinsics. NEON is always available on ARMv8+ so no runtime
 //! detection is needed.
 //!
-//! TODO(AIQ-6 follow-up): implement these. The scalar path is correct and
-//! sufficient for the first commit; NEON optimisations land incrementally.
+//! TODO: implement these. The scalar path is correct and sufficient for
+//! now; NEON optimisations land incrementally.
 
 #![allow(dead_code)]
 

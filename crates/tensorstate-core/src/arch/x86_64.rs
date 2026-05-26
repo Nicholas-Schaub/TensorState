@@ -4,9 +4,8 @@
 //! must runtime-detect via `is_x86_feature_detected!` before calling them.
 //! Calling without the required feature is undefined behavior.
 //!
-//! TODO(AIQ-6 follow-up): implement these. The scalar path is correct and
-//! sufficient for the first commit; SIMD optimisations are tracked separately
-//! and land incrementally.
+//! TODO: implement these. The scalar path is correct and sufficient for
+//! now; SIMD optimisations land incrementally.
 
 #![allow(dead_code)]
 

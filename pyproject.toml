@@ -107,7 +107,7 @@ ignore = [
     "D213",    # multi-line docstring summary should start at second line (conflicts with D212)
     "ANN401",  # dynamically typed expressions (Any) — research code uses Any
     "TRY003",  # avoid long messages outside exception class — too restrictive
-    # Deferred to AIQ-8 (docstring + type-annotation pass)
+    # Deferred until the docstring + type-annotation pass is finished
     "D101",    # undocumented-public-class
     "D102",    # undocumented-public-method
     "D105",    # undocumented-magic-method
@@ -119,7 +119,7 @@ ignore = [
     "ANN202",  # missing-return-type-private-function
     "ANN204",  # missing-return-type-special-method
     "ANN206",  # missing-return-type-class-method
-    # Deferred to AIQ-18 (layout reorganization)
+    # Deferred until the module-layout reorganization (CamelCase rename)
     "N999",    # invalid-module-name (TensorState/States.py etc. are CamelCase)
 ]
 
@@ -151,9 +151,9 @@ include = ["src", "tests"]
 [tool.ty.environment]
 python-version = "3.13"
 
-# Rules deferred to AIQ-8 (type-annotation + narrowing pass).
-# These are surfaced by ty but require refactors to fix properly
-# (e.g., narrowing `data: ModuleData` on each OpNode subclass).
+# Rules deferred until the type-annotation + narrowing refactor lands.
+# These are surfaced by ty but require non-trivial code changes to fix
+# properly (e.g., narrowing `data: ModuleData` on each OpNode subclass).
 [tool.ty.rules]
 unresolved-attribute = "warn"
 invalid-attribute-access = "warn"

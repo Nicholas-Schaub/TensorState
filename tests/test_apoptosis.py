@@ -1,4 +1,4 @@
-"""Unit tests for the merge / destroy primitives added in AIQ-4.
+"""Unit tests for the merge / destroy primitives in Dependency.py.
 
 Validates per-node merge_outputs / merge_inputs / destroy_outputs /
 destroy_inputs for each layer type, plus candidate-generation and

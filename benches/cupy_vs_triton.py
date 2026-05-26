@@ -1,18 +1,14 @@
 """GPU benchmark: native PyTorch vs Triton (current) vs CuPy (reference).
 
-Validates that the Triton GPU kernel from AIQ-7 produces byte-identical
-output to the Cython AVX baseline AND to a reference CuPy ElementwiseKernel
-implementation, and compares their throughput on the same hardware.
+Validates that the Triton GPU kernel produces byte-identical output to the
+Cython AVX baseline AND to a reference CuPy ElementwiseKernel implementation,
+and compares their throughput on the same hardware.
 
 Prerequisites:
 - A CUDA-capable GPU.
 - Build the Cython extension via ``bash scripts/build-cython.sh``.
 - ``uv pip install cupy-cuda12x`` for the CuPy reference (not a required
   project dependency; CuPy is included only for benchmark comparison).
-
-Originally written during AIQ-7 to demonstrate that the Triton kernel
-matches the CuPy ElementwiseKernel; preserved in-tree for future
-regression / parity checks.
 """
 
 import time
@@ -34,7 +30,7 @@ except ImportError as exc:
     ) from exc
 
 
-# Inline CuPy ElementwiseKernel matching the original (pre-AIQ-7) impl.
+# Inline CuPy ElementwiseKernel matching the original CuPy-based impl.
 _compress_kernel_cupy = cupy.ElementwiseKernel(
     "raw T myarray, raw int64 myarray_size, raw int64 in_cols, raw int64 out_cols, raw int64 stride",
     "uint8 packed",
