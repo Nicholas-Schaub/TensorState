@@ -21,11 +21,11 @@
 
 use pyo3::prelude::*;
 
-mod arch;
-mod compress_f32;
-mod compress_u8;
-mod decompress;
-mod lex_sort;
+pub mod arch;
+pub mod compress_f32;
+pub mod compress_u8;
+pub mod decompress;
+pub mod lex_sort;
 
 use numpy::{IntoPyArray, PyArray1, PyArray2, PyReadonlyArray2};
 

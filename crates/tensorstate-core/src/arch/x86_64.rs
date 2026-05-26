@@ -3,6 +3,10 @@
 //! Functions in this module require AVX2 or BMI2 respectively; the caller
 //! must runtime-detect via `is_x86_feature_detected!` before calling them.
 //! Calling without the required feature is undefined behavior.
+//!
+//! The dispatch wrappers in `compress_f32` and `compress_u8` perform the
+//! feature detection at module-load time and cache the resulting function
+//! pointer in an `OnceLock`.
 
 use std::arch::x86_64::*;
 

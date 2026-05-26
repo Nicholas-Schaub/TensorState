@@ -19,6 +19,16 @@ extension implementation, and runtime dependencies are new.
 - **Rust CPU extension** replacing the Cython AVX/BMI2 bit-packing
   routines. Built via `maturin` + PyO3; ships pre-compiled wheels for
   Linux / macOS / Windows. Output is byte-identical to the Cython baseline.
+- **Hand-tuned SIMD compress paths with runtime dispatch.** AVX2 +
+  BMI2 implementations on x86_64 and NEON on aarch64, behind a
+  `OnceLock`-cached function-pointer dispatch. AVX2 is preferred when
+  available; falls back through BMI2 (u8 path only) to scalar.
+  Production `_compress_tensor_ps` / `_compress_tensor_pi8` inherit
+  the speedup transparently — measurements show ~3–7× faster than
+  Cython AVX on the f32 path and ~10–13× faster than Cython BMI2 on
+  the u8 path. Cargo parity tests verify byte-equivalence with the
+  scalar reference. `_build_info()` reports the runtime-selected
+  path (e.g., `"x86_64 avx2/avx2"`).
 - **Triton GPU kernel** replacing the CuPy ElementwiseKernel for the
   bit-pack hot path. Dispatched automatically when the input tensor is
   on CUDA; matches CuPy throughput at the chunk sizes typical of CNN
@@ -84,5 +94,5 @@ extension implementation, and runtime dependencies are new.
   compressed array directly, causing a misleading PyO3 type error. The
   Rust signature now matches Cython.
 
-[Unreleased]: https://github.com/Nicholas-Schaub/TensorState/compare/v0.5.0...HEAD
 [0.5.0.dev1]: https://github.com/Nicholas-Schaub/TensorState/releases/tag/v0.5.0.dev1
+[unreleased]: https://github.com/Nicholas-Schaub/TensorState/compare/v0.5.0...HEAD

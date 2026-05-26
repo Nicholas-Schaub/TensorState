@@ -10,7 +10,9 @@ description = "Rust core of the TensorState neural-network analysis library: bit
 
 [lib]
 name = "_tensorstate_rs"
-crate-type = ["cdylib"]
+# cdylib for the Python extension; rlib so the crate can be linked from
+# integration tests in `tests/` and any other Rust consumer.
+crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 pyo3 = { version = "0.28", features = ["extension-module"] }

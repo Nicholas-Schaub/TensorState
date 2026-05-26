@@ -119,14 +119,17 @@ def benchmark() -> None:
     n_rows = 10000
     rng = np.random.default_rng(46)
 
+    # `Rust dispatched` is the production `_compress_tensor_ps`, which now
+    # auto-selects AVX2 / NEON / scalar via OnceLock. `Rust SIMD` is the
+    # explicit `_compress_tensor_ps_simd` for cross-checking.
     header = (
         f"{'cols':>6}  "
         f"{'Cython AVX':>12}  "
-        f"{'Rust scalar':>12}  "
+        f"{'Rust dispatch':>14}  "
         f"{'Rust SIMD':>12}  "
-        f"{'scalar/cy':>10}  "
+        f"{'dispatch/cy':>11}  "
         f"{'simd/cy':>10}  "
-        f"{'simd/scalar':>12}"
+        f"{'simd/disp':>10}"
     )
     print(header)
     print("-" * len(header))
@@ -138,11 +141,11 @@ def benchmark() -> None:
         print(
             f"{n_cols:>6}  "
             f"{t_cy:>9.2f} ms  "
-            f"{t_rs:>9.2f} ms  "
+            f"{t_rs:>11.2f} ms  "
             f"{t_si:>9.2f} ms  "
-            f"{t_rs / t_cy:>9.2f}x  "
+            f"{t_rs / t_cy:>10.2f}x  "
             f"{t_si / t_cy:>9.2f}x  "
-            f"{t_si / t_rs:>11.2f}x"
+            f"{t_si / t_rs:>9.2f}x"
         )
 
 
