@@ -171,3 +171,8 @@ TensorState/__pycache__
 # Rust build artifacts
 /target/
 /Cargo.lock
+
+# Design / decision documents — per project policy, design discussion
+# lives in Plane, not in the library repo. The decisions/ directory
+# is a scratchpad for proposals; nothing in it is committed.
+decisions/
