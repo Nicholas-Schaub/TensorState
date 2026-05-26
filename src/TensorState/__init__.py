@@ -19,4 +19,4 @@ from .TensorState import (  # noqa
     zero_info,
 )
 
-__version__ = "0.5.0-dev1"
+__version__ = "0.5.0.dev1"
