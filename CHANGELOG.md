@@ -41,6 +41,12 @@ extension implementation, and runtime dependencies are new.
   that walks the module graph and applies merge-then-destroy with
   linearity preservation (mean for producing layer, sum for consuming
   layer).
+- **`tensorstate.testing` fixture package** — download-free, deterministic
+  data and models for tests, examples, and benchmarks: `tiny_dataset`,
+  `tiny_text_dataset`, `tiny_loader`, `random_states`, `degenerate_states`,
+  `seed_all`, and a `small_model` registry (`lenet5`, `mlp`,
+  `groupnorm_conv`, `tiny_transformer`). Re-exported as pytest fixtures
+  via a `pytest11` entry point so downstream repos get them for free.
 - **mkdocs-material documentation** with mkdocstrings-driven API pages
   (replacing the old Sphinx/RST setup).
 - **Modern code-quality tooling**: ruff (lint + format), ty (type

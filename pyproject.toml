@@ -34,6 +34,9 @@ Homepage = "https://github.com/Nicholas-Schaub/TensorState"
 Documentation = "https://nicholas-schaub.github.io/TensorState/"
 Issues = "https://github.com/Nicholas-Schaub/TensorState/issues"
 
+[project.entry-points.pytest11]
+tensorstate = "TensorState.testing.pytest_plugin"
+
 [dependency-groups]
 dev = [
     "cython>=3.0",
