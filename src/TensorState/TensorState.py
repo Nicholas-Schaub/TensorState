@@ -2,6 +2,7 @@ import logging
 from collections import OrderedDict
 
 import numpy as np
+import torch
 
 from TensorState.Layers import StateCaptureHook
 
@@ -170,6 +171,10 @@ def _pt_efficiency_model(
 ):
     model.efficiency_layers = []
     model.state_capture_hooks = []
+    # Probes are owned here, off every module's forward path. Adding them
+    # as children of the watched module would break container modules
+    # (nn.Sequential and friends) whose forward iterates their children.
+    model._tensorstate_probes = torch.nn.ModuleDict()
 
     layer_ids = {
         id(module): (module.__class__.__name__, None, module)
@@ -188,6 +193,9 @@ def _pt_efficiency_model(
         ) and mod_name not in attach_to:
             continue
 
+        # ModuleDict keys cannot contain "."; sanitize the qualified name.
+        base_key = (mod_name or "root").replace(".", "__")
+
         # Add pre-hook if requested
         if method in ["before", "both"]:
             efficiency_layer = StateCaptureHook(
@@ -195,10 +203,11 @@ def _pt_efficiency_model(
                 disk_path=storage_path,
                 memory_device=memory_device,
             )
+            model._tensorstate_probes[f"{base_key}_pre"] = efficiency_layer
             model.efficiency_layers.append(efficiency_layer)
 
             model.state_capture_hooks.append(
-                module.register_forward_pre_hook(efficiency_layer)
+                module.register_forward_pre_hook(efficiency_layer._capture)
             )
 
         if method in ["after", "both"]:
@@ -207,10 +216,11 @@ def _pt_efficiency_model(
                 disk_path=storage_path,
                 memory_device=memory_device,
             )
+            model._tensorstate_probes[f"{base_key}_post"] = efficiency_layer
             model.efficiency_layers.append(efficiency_layer)
 
             model.state_capture_hooks.append(
-                module.register_forward_hook(efficiency_layer)
+                module.register_forward_hook(efficiency_layer._capture)
             )
 
     return model
@@ -299,6 +309,10 @@ def remove_state_layers(model) -> None:
             hook.remove()
         del model.state_capture_hooks
         del model.efficiency_layers
+
+    # Drop the probe container (probes live here, off the forward path).
+    if hasattr(model, "_tensorstate_probes"):
+        del model._tensorstate_probes
 
     for _name, child in model._modules.items():
         if child is not None:

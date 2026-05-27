@@ -7,7 +7,7 @@ logging.basicConfig(
 logger = logging.getLogger("TensorState")
 
 from .Dependency import ElementNode, ModuleGraph, OpNode  # noqa
-from .Layers import StateCaptureHook  # noqa
+from .Layers import Probe, StateCaptureHook  # noqa
 from .models import LeNet_5, mobilenet_v2  # noqa
 from .States import compress_states, decompress_states, sort_states  # noqa
 from .TensorState import (  # noqa

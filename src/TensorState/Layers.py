@@ -100,7 +100,6 @@ class AbstractStateCapture(abc.ABC):
     _threads: ClassVar[list[Future]] = []
     _zarr_path = None
     _channel_index = -1
-    _state_cache = None
     _state_cache_index = 0
     _gpu_buffer_mb: float = 256.0
 
@@ -505,16 +504,49 @@ class AbstractStateCapture(abc.ABC):
         return self.entropy(alpha1) / self.entropy(alpha2)
 
 
-class StateCaptureHook(AbstractStateCapture):
-    """StateCapture hook for PyTorch.
+class Probe(torch.nn.Module):
+    """Marker base for observational capture submodules.
 
-    This class implements all methods in AbstractStateCapture, but is
-    designed to be a pre or post hook for a layer.
+    A Probe is an ``nn.Module`` so its buffers travel with ``.to()`` /
+    ``.cuda()`` and it is discoverable via ``model.named_modules()``
+    (filter with ``isinstance(m, Probe)``). Probes carry no parameters
+    and are NOT meant to be called directly — their capture logic runs
+    as a forward (or forward-pre) hook on the watched module, and the
+    probe object itself is owned by a top-level ``_tensorstate_probes``
+    container that no forward pass iterates.
     """
 
-    def __init__(self, name, disk_path=None, memory_device="cpu", **kwargs):
-        # Use both parent class initializers
-        super().__init__(name, disk_path, memory_device=memory_device, **kwargs)
+    def forward(self, *args, **kwargs):
+        raise RuntimeError(
+            f"{type(self).__name__} is an observational probe and is not "
+            "meant to be called directly; its capture runs as a forward "
+            "hook on the watched module."
+        )
+
+
+class StateCaptureHook(AbstractStateCapture, Probe):
+    """State-capture probe for PyTorch.
+
+    Implements all of :class:`AbstractStateCapture` and is an
+    :class:`Probe` (``nn.Module``). The capture logic in :meth:`_capture`
+    is registered as a pre- or post-forward hook on the watched module;
+    the probe object is owned by the model's ``_tensorstate_probes``
+    container so its buffers travel with the model without sitting in any
+    module's forward path.
+    """
+
+    def __init__(self, name, disk_path=None, memory_device=None, **kwargs):
+        # nn.Module.__init__ must run before any buffer/submodule
+        # assignment, so initialize the Probe (nn.Module) side first.
+        Probe.__init__(self)
+        AbstractStateCapture.__init__(
+            self, name, disk_path, memory_device=memory_device, **kwargs
+        )
+
+        # Transient GPU cache as a non-persistent buffer: it travels with
+        # the module under .to()/.cuda() but never lands in state_dict
+        # (observational state is tied to data, not weights).
+        self.register_buffer("_state_cache", None, persistent=False)
 
         self._channel_index = 1
 
@@ -526,7 +558,14 @@ class StateCaptureHook(AbstractStateCapture):
             tensor = (tensor > 0).cpu().numpy()
         self._compress_and_store(tensor)
 
-    def __call__(self, *args):
+    def _capture(self, *args):
+        """Forward-hook callable registered on the watched module.
+
+        Matches both the forward-hook ``(module, inputs, output)`` and
+        forward-pre-hook ``(module, inputs)`` signatures by operating on
+        the last positional argument (output for post-hooks, inputs for
+        pre-hooks), preserving the prior bare-callable behavior.
+        """
         if self._input_shape is None:
             self.reset_states(tuple(args[-1].shape))
 
