@@ -12,6 +12,7 @@ import torch
 from TensorState.Dependency import (
     ApoptosisType,
     BatchNormNode,
+    ConvGroupNode,
     ConvNode,
     GroupNormNode,
     LayerNormNode,
@@ -166,6 +167,130 @@ def test_conv_merge_inputs_sums_columns():
     expected = original[:, 1] + original[:, 5]
     assert torch.allclose(layer.weight.data[:, 1], expected)
     assert redundant == [5]
+
+
+# ---------------------------------------------------------------------------
+# Conv forward-invariant under real (N,C,H,W) input (AIQ-16 cases 1, 3, 5)
+#
+# The existing mean-on-producer / sum-on-consumer surgery is spatially correct
+# because the channel ops never touch the spatial dims. These tests pin the
+# *forward* invariant: merging two identical producer channels and summing the
+# consumer's matching input columns must leave the downstream output unchanged,
+# across kernel/stride/padding/dilation/bias and the transposed weight layout.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "conv_kwargs",
+    [
+        {"kernel_size": 3, "padding": 1},
+        {"kernel_size": 3, "padding": 1, "stride": 2},
+        {"kernel_size": 3, "padding": 1, "bias": False},
+        {"kernel_size": 5, "padding": 2, "dilation": 2},
+    ],
+)
+def test_conv_forward_invariant_under_merge_destroy(conv_kwargs):
+    torch.manual_seed(0)
+    prod = torch.nn.Conv2d(3, 8, **conv_kwargs)
+    cons = torch.nn.Conv2d(8, 4, kernel_size=3, padding=1)
+
+    # Force producer output channels 1 and 4 to be identical neurons.
+    prod.weight.data[4] = prod.weight.data[1].clone()
+    if prod.bias is not None:
+        prod.bias.data[4] = prod.bias.data[1].clone()
+
+    x = torch.randn(2, 3, 16, 16)
+    before = cons(prod(x)).detach().clone()
+
+    prod_node = ConvNode(_fake_module_data(prod))
+    cn = ConvNode(_fake_module_data(cons))
+    prod_node.merge_outputs([[1, 4]])
+    cn.merge_inputs([[1, 4]])
+    prod_node.destroy_outputs([4])
+    cn.destroy_inputs([4])
+
+    after = cons(prod(x)).detach()
+    assert torch.allclose(before, after, atol=1e-5), (
+        f"max diff {(before - after).abs().max().item()}"
+    )
+    assert prod.out_channels == 7
+    assert cons.in_channels == 7
+
+
+def test_convgroup_depthwise_forward_invariant_and_structure():
+    """Depthwise conv: a channel and its producer are one linked neuron.
+
+    The whole linked group (producer output + depthwise filter) must be
+    merged together; destroy keeps in_channels == out_channels == groups.
+    """
+    torch.manual_seed(0)
+    prod = torch.nn.Conv2d(3, 8, kernel_size=3, padding=1)
+    dw = torch.nn.Conv2d(8, 8, kernel_size=3, padding=1, groups=8)
+    cons = torch.nn.Conv2d(8, 4, kernel_size=3, padding=1)
+
+    # Channels 1 and 4 identical through the full linked group.
+    prod.weight.data[4] = prod.weight.data[1].clone()
+    prod.bias.data[4] = prod.bias.data[1].clone()
+    dw.weight.data[4] = dw.weight.data[1].clone()
+    dw.bias.data[4] = dw.bias.data[1].clone()
+
+    x = torch.randn(2, 3, 16, 16)
+    before = cons(dw(prod(x))).detach().clone()
+
+    prod_node = ConvNode(_fake_module_data(prod))
+    gn = ConvGroupNode(_fake_module_data(dw))
+    cn = ConvNode(_fake_module_data(cons))
+    prod_node.merge_outputs([[1, 4]])
+    gn.merge_outputs([[1, 4]])
+    cn.merge_inputs([[1, 4]])
+    prod_node.destroy_outputs([4])
+    gn.destroy_outputs([4])
+    cn.destroy_inputs([4])
+
+    after = cons(dw(prod(x))).detach()
+    assert torch.allclose(before, after, atol=1e-5), (
+        f"max diff {(before - after).abs().max().item()}"
+    )
+    assert dw.in_channels == dw.out_channels == dw.groups == 7
+
+
+@pytest.mark.parametrize(
+    "tconv_kwargs",
+    [
+        {"kernel_size": 3, "padding": 1},
+        {"kernel_size": 4, "stride": 2, "padding": 1},
+        {"kernel_size": 3, "stride": 2, "padding": 1, "output_padding": 1},
+    ],
+)
+def test_convtranspose_forward_invariant(tconv_kwargs):
+    """Transposed conv weight is (C_in, C_out, ...): out-channels on dim 1.
+
+    Exercises the dead ``layer.transposed`` branches and confirms
+    output_padding (which touches spatial extent, not channels) is invariant.
+    """
+    torch.manual_seed(0)
+    prod = torch.nn.ConvTranspose2d(3, 8, **tconv_kwargs)
+    cons = torch.nn.Conv2d(8, 4, kernel_size=3, padding=1)
+
+    # Out-channel axis is dim 1 for transposed weights.
+    prod.weight.data[:, 4] = prod.weight.data[:, 1].clone()
+    prod.bias.data[4] = prod.bias.data[1].clone()
+
+    x = torch.randn(2, 3, 8, 8)
+    before = cons(prod(x)).detach().clone()
+
+    prod_node = ConvNode(_fake_module_data(prod))
+    cn = ConvNode(_fake_module_data(cons))
+    prod_node.merge_outputs([[1, 4]])
+    cn.merge_inputs([[1, 4]])
+    prod_node.destroy_outputs([4])
+    cn.destroy_inputs([4])
+
+    after = cons(prod(x)).detach()
+    assert torch.allclose(before, after, atol=1e-5), (
+        f"max diff {(before - after).abs().max().item()}"
+    )
+    assert prod.out_channels == 7
 
 
 # ---------------------------------------------------------------------------
