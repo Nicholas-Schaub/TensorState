@@ -105,19 +105,36 @@ def main() -> int:
         )
         return 0
 
-    bare_breaks = _graph_breaks(_build(probes=False), x)
-    probe_breaks = _graph_breaks(_build(probes=True), x)
-    comp_bare = _time(_build(probes=False), x, compiled=True, iters=args.iters)
-    comp_probe = _time(_build(probes=True), x, compiled=True, iters=args.iters)
-    print(
-        f"\ngraph breaks  no-probes={bare_breaks}  probes={probe_breaks}  "
-        f"(delta={probe_breaks - bare_breaks})"
+    def _safe(fn):
+        try:
+            return fn(), None
+        except Exception as exc:  # noqa: BLE001 -- report per cell, don't abort
+            return None, f"{type(exc).__name__}: {str(exc).splitlines()[0][:90]}"
+
+    bare_breaks, e1 = _safe(lambda: _graph_breaks(_build(probes=False), x))
+    probe_breaks, e2 = _safe(lambda: _graph_breaks(_build(probes=True), x))
+    comp_bare, e3 = _safe(
+        lambda: _time(_build(probes=False), x, compiled=True, iters=args.iters)
     )
+    comp_probe, e4 = _safe(
+        lambda: _time(_build(probes=True), x, compiled=True, iters=args.iters)
+    )
+
+    print("\ngraph breaks:")
+    print(f"  no probes: {bare_breaks if e1 is None else 'FAILED — ' + e1}")
+    print(f"  probes:    {probe_breaks if e2 is None else 'FAILED — ' + e2}")
     print("compiled step time (ms/iter):")
-    print(
-        f"  no probes {comp_bare:8.3f}   probes {comp_probe:8.3f}   "
-        f"probe overhead +{comp_probe - comp_bare:.3f}"
-    )
+    print(f"  no probes: {f'{comp_bare:.3f}' if e3 is None else 'FAILED — ' + e3}")
+    print(f"  probes:    {f'{comp_probe:.3f}' if e4 is None else 'FAILED — ' + e4}")
+    if e2 or e4:
+        print(
+            "\nFinding: with probes attached the capture hook is traced by "
+            "TorchDynamo and is NOT dynamo-safe — the host-side bit-pack/store "
+            "path crashes the trace rather than cleanly graph-breaking. "
+            "Mitigation: wrap the hook body in torch._dynamo.disable so it falls "
+            "back to eager. Revisit after the DuckDB storage migration, which "
+            "replaces the numcodecs/zarr write path implicated here."
+        )
     return 0
 
 
