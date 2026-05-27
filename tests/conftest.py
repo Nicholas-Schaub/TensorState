@@ -1,6 +1,3 @@
-from pathlib import Path
-from shutil import rmtree
-
 import pytest
 import torch
 import torchvision
@@ -152,18 +149,15 @@ def model(request):
     return model, layer
 
 
-@pytest.fixture(params=[None, Path("./states")])
-def disk_path(request, worker_id):
-    path: Path = request.param
+@pytest.fixture(params=[None, "disk"])
+def disk_path(request, tmp_path_factory):
+    if request.param is None:
+        return None
 
-    if path is not None:
-        path = path.with_name(path.name + f"_{worker_id}")
-        path.mkdir()
-
-    yield path
-
-    if path is not None:
-        rmtree(path)
+    # Use pytest's tmp_path_factory so each parametrized case gets a unique,
+    # auto-cleaned directory. This avoids the FileExistsError that occurred
+    # when reusing a fixed "./states_<worker>" path across cases.
+    return tmp_path_factory.mktemp("states")
 
 
 def pytest_addoption(parser):
