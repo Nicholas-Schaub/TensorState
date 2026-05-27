@@ -9,8 +9,10 @@ import numpy as np
 import pytest
 import torch
 
+from TensorState import testing as ts_testing
 from TensorState.Dependency import (
     ApoptosisType,
+    AttentionNode,
     BatchNormNode,
     ConvGroupNode,
     ConvNode,
@@ -18,6 +20,7 @@ from TensorState.Dependency import (
     LayerNormNode,
     LinearNode,
     ModuleData,
+    ModuleGraph,
     correlated_weight_groups,
     zero_info_groups,
 )
@@ -425,3 +428,207 @@ def test_apoptosis_type_flag_arithmetic():
     assert int(ApoptosisType.states) == 0
     assert ApoptosisType.weights | ApoptosisType.connections == ApoptosisType.wc
     assert ApoptosisType.weights & ApoptosisType.wc == ApoptosisType.weights
+
+
+# ---------------------------------------------------------------------------
+# MultiheadAttention — AttentionNode (head-level, EXACT-ONLY)
+#
+# The merge unit is a HEAD. in_proj_weight is packed (3*E, E) = [W_q; W_k; W_v]
+# stacked row-blocks; head h owns rows h*hd:(h+1)*hd within each block (offsets
+# 0, E, 2E) plus out_proj.weight COLUMNS h*hd:(h+1)*hd. Because softmax(QKᵀ) is
+# non-linear in the projection weights, the exact forward invariant only holds
+# for destroying dead/duplicate heads and merging IDENTICAL heads.
+# ---------------------------------------------------------------------------
+
+
+def _make_heads_identical(
+    mha: torch.nn.MultiheadAttention, src: int, dst: int
+) -> slice:
+    """Make heads ``src`` and ``dst`` produce IDENTICAL per-head outputs.
+
+    Destroying the merged duplicate shrinks ``embed_dim`` by ``head_dim``,
+    which drops ``dst``'s embed slice from the input columns. So we first
+    zero that input slice across all projections (no head reads it), then
+    copy ``src``'s Q/K/V row-blocks + bias into ``dst`` so both heads apply
+    the same projection to the same (remaining) input -> identical outputs.
+    Returns the ``dst`` embed slice that will be removed on destroy.
+    """
+    e = mha.embed_dim
+    hd = e // mha.num_heads
+    w = mha.in_proj_weight.data
+    b = mha.in_proj_bias.data
+    dst_sl = slice(dst * hd, (dst + 1) * hd)
+    with torch.no_grad():
+        for block in range(3):
+            off = block * e
+            # No projection reads dst's input slice (it gets dropped on destroy).
+            w[:, dst_sl] = 0.0
+            # dst's row block == src's row block -> identical per-head output.
+            w[off + dst * hd : off + (dst + 1) * hd] = w[
+                off + src * hd : off + (src + 1) * hd
+            ].clone()
+            b[off + dst * hd : off + (dst + 1) * hd] = b[
+                off + src * hd : off + (src + 1) * hd
+            ].clone()
+    return dst_sl
+
+
+def _dead_head_slice(mha: torch.nn.MultiheadAttention, head: int) -> slice:
+    """Fully isolate ``head``'s embed slice so removing it is lossless.
+
+    Removing a head shrinks ``embed_dim`` (PyTorch requires
+    ``embed_dim == head_dim * num_heads``), which drops the input columns
+    and out_proj rows in that head's slice. The forward stays invariant on
+    the surviving dimensions only if no surviving head reads that input
+    slice and no surviving output dim is produced from it. So we zero the
+    slice's input columns across all projections, the head's own output
+    rows, and out_proj's coupling into/out of that slice.
+    """
+    e = mha.embed_dim
+    hd = e // mha.num_heads
+    sl = slice(head * hd, (head + 1) * hd)
+    with torch.no_grad():
+        for block in range(3):
+            off = block * e
+            # Zero this head's output rows (it produces nothing).
+            mha.in_proj_weight.data[off + head * hd : off + (head + 1) * hd] = 0.0
+            mha.in_proj_bias.data[off + head * hd : off + (head + 1) * hd] = 0.0
+            # Zero this slice's INPUT columns so survivors don't read it.
+            mha.in_proj_weight.data[:, sl] = 0.0
+        # out_proj: zero this head's input columns and its output rows.
+        mha.out_proj.weight.data[:, sl] = 0.0
+        mha.out_proj.weight.data[sl, :] = 0.0
+        if mha.out_proj.bias is not None:
+            mha.out_proj.bias.data[sl] = 0.0
+    return sl
+
+
+@pytest.mark.parametrize("batch_first", [True, False])
+def test_attention_destroy_zeroed_head_forward_invariant(batch_first):
+    torch.manual_seed(0)
+    e, h = 8, 4
+    mha = torch.nn.MultiheadAttention(e, h, batch_first=batch_first)
+    mha.eval()
+    hd = e // h
+    sl = _dead_head_slice(mha, head=2)
+    keep = [i for i in range(e) if not (sl.start <= i < sl.stop)]
+
+    x = torch.randn(2, 5, e) if batch_first else torch.randn(5, 2, e)
+    before, _ = mha(x, x, x)
+    before = before.detach().clone()
+
+    node = AttentionNode(_fake_module_data(mha))
+    node.destroy_outputs([2])
+
+    # embed_dim shrank: feed the narrowed input, compare on kept dims.
+    x_narrow = x[..., keep]
+    after, _ = mha(x_narrow, x_narrow, x_narrow)
+    after = after.detach()
+    assert mha.num_heads == 3
+    assert mha.embed_dim == e - hd
+    assert torch.allclose(before[..., keep], after, atol=1e-4), (
+        f"max diff {(before[..., keep] - after).abs().max().item()}"
+    )
+
+
+@pytest.mark.parametrize("batch_first", [True, False])
+def test_attention_merge_identical_heads_forward_invariant(batch_first):
+    torch.manual_seed(1)
+    e, h = 8, 4
+    mha = torch.nn.MultiheadAttention(e, h, batch_first=batch_first)
+    mha.eval()
+    hd = e // h
+    # Make heads 0 and 1 produce identical per-head outputs, then merge {0,1}
+    # (mean Q/K/V producer, sum out_proj consumer) and destroy the duplicate.
+    # Survivor is head 0, the destroyed duplicate is head 1, so make head 1's
+    # embed slice the disposable one and head 1 identical to head 0.
+    sl = _make_heads_identical(mha, src=0, dst=1)
+    keep = [i for i in range(e) if not (sl.start <= i < sl.stop)]
+
+    x = torch.randn(2, 5, e) if batch_first else torch.randn(5, 2, e)
+    before, _ = mha(x, x, x)
+    before = before.detach().clone()
+
+    node = AttentionNode(_fake_module_data(mha))
+    redundant = node.merge_outputs(groups=[[0, 1]])
+    assert redundant == [1]
+    node.destroy_outputs(redundant)
+
+    # embed_dim shrank by one head; feed narrowed input, compare kept dims.
+    x_narrow = x[..., keep]
+    after, _ = mha(x_narrow, x_narrow, x_narrow)
+    after = after.detach()
+    assert mha.num_heads == 3
+    assert mha.embed_dim == e - hd
+    assert torch.allclose(before[..., keep], after, atol=1e-4), (
+        f"max diff {(before[..., keep] - after).abs().max().item()}"
+    )
+
+
+def test_attention_destroy_head_bookkeeping_shapes():
+    e, h = 12, 4
+    mha = torch.nn.MultiheadAttention(e, h)
+    hd = e // h
+    node = AttentionNode(_fake_module_data(mha))
+    node.destroy_outputs([1])
+    new_e = e - hd
+    assert mha.embed_dim == new_e
+    assert mha.num_heads == h - 1
+    # in_proj_weight stays packed (3*E', E') and bias (3*E',).
+    assert mha.in_proj_weight.shape == (3 * new_e, new_e)
+    assert mha.in_proj_bias.shape == (3 * new_e,)
+    # out_proj: Linear(E', E') -> weight (E', E').
+    assert mha.out_proj.weight.shape == (new_e, new_e)
+    assert mha.out_proj.in_features == new_e
+    assert mha.out_proj.out_features == new_e
+
+
+def test_attention_destroy_indivisible_raises():
+    # embed_dim 8, 4 heads (hd=2). Removing one head -> embed_dim 6, heads 3 -> ok.
+    # Construct a case where the leftover is NOT divisible: a model where heads
+    # do not evenly tile is impossible for nn.MultiheadAttention construction,
+    # so we assert the divisibility guard by directly forcing an inconsistent
+    # state: embed_dim that leaves a non-divisible remainder is checked after.
+    e, h = 8, 4
+    mha = torch.nn.MultiheadAttention(e, h)
+    node = AttentionNode(_fake_module_data(mha))
+    # Monkey-force num_heads so that after removing one head, embed_dim %
+    # num_heads != 0. With hd=2, destroy 1 head -> embed_dim 6. If we pretend
+    # there are 4 heads remaining the guard must fire.
+    mha.num_heads = 5  # 8 % 5 != 0 to begin; destroying yields indivisible
+    with pytest.raises(AssertionError):
+        node.destroy_outputs([0])
+
+
+def test_attention_surfaces_as_single_node_in_graph():
+    """A model containing MHA must produce exactly one AttentionNode whose
+    data.module is the MHA instance, and out_proj must not surface separately."""
+    torch.manual_seed(0)
+    m = ts_testing.small_model("tiny_transformer")
+    m.eval()
+    inp = torch.randint(0, 64, (1, 8))
+    graph = ModuleGraph(m, inp_tensor=inp)
+
+    attention_nodes = []
+    mha_modules = [
+        mod for mod in m.modules() if isinstance(mod, torch.nn.MultiheadAttention)
+    ]
+    for grp in graph.groups:
+        for v in grp.V():
+            if isinstance(v, AttentionNode):
+                attention_nodes.append(v)
+
+    assert len(attention_nodes) == len(mha_modules), (
+        f"expected {len(mha_modules)} AttentionNodes, got {len(attention_nodes)}"
+    )
+    surfaced_mhas = {id(v.data.module) for v in attention_nodes}
+    assert surfaced_mhas == {id(mod) for mod in mha_modules}
+
+    # out_proj children must NOT surface as their own module nodes.
+    out_projs = {id(mod.out_proj) for mod in mha_modules}
+    for grp in graph.groups:
+        for v in grp.V():
+            if isinstance(v.data, ModuleData):
+                assert id(v.data.module) not in out_projs, (
+                    "out_proj surfaced as its own node"
+                )

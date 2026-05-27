@@ -875,6 +875,159 @@ class LinearNode(OpNode):
 
 
 # =============================================================================
+# Specialized nodes — MultiheadAttention (head-level, EXACT-ONLY)
+# =============================================================================
+
+
+@OpNode.register(torch.nn.MultiheadAttention)
+class AttentionNode(OpNode):
+    """Head-level merge / destroy for ``nn.MultiheadAttention``.
+
+    The merge unit is a **head**, not a channel. ``in_proj_weight`` is the
+    packed projection tensor of shape ``(3*E, E)`` = ``[W_q; W_k; W_v]``
+    stacked as three row-blocks; ``in_proj_bias`` is ``(3*E,)``. With
+    ``hd = E // num_heads`` head ``h`` owns rows ``h*hd:(h+1)*hd`` within
+    *each* of the three blocks (block offsets ``0``, ``E``, ``2E``) plus
+    ``out_proj.weight`` *columns* ``h*hd:(h+1)*hd``.
+
+    EXACT-ONLY scope (ratified decision — do not exceed):
+    ``softmax(QKᵀ / √d)`` is non-linear in the projection weights, so the
+    forward output is preserved exactly only when
+
+    - **destroying** dead / duplicate heads (their Q/K/V projections and
+      ``out_proj`` columns are removed), or
+    - **merging IDENTICAL heads** — heads whose Q/K/V projection blocks are
+      equal. Averaging the producer (Q/K/V) blocks of identical heads is a
+      no-op on each head's output; summing the consumer (``out_proj``)
+      column-blocks then reproduces the original ``(W_a + W_b) @ o``
+      contribution.
+
+    Approximate merging of *distinct* heads is intentionally NOT
+    implemented: there is no linear weight surgery that preserves the
+    softmax mixture of two different heads.
+    """
+
+    def _hd(self) -> int:
+        layer = self.data.module
+        return layer.embed_dim // layer.num_heads
+
+    def dendrites(self):
+        return self.data.module.embed_dim
+
+    neurons = dendrites
+
+    def _head_rows(self, head: int, hd: int, embed_dim: int) -> list[int]:
+        """Packed-tensor row indices owned by ``head`` across Q/K/V blocks."""
+        rows: list[int] = []
+        for block in range(3):
+            off = block * embed_dim
+            rows.extend(range(off + head * hd, off + (head + 1) * hd))
+        return rows
+
+    def merge_outputs(self, groups: list[list[int]]) -> list[int]:
+        """Merge IDENTICAL heads: mean producer (Q/K/V), sum consumer (out_proj).
+
+        Each group lists head indices; the first is the survivor. The
+        survivor's Q/K/V row-blocks + bias slices become the mean of the
+        group's heads and its ``out_proj`` column-block becomes their sum.
+        Only exact (identical-head) merges preserve the forward output.
+        """
+        layer = self.data.module
+        e = layer.embed_dim
+        hd = self._hd()
+        w = layer.in_proj_weight.data
+        b = layer.in_proj_bias.data if layer.in_proj_bias is not None else None
+        out_w = layer.out_proj.weight.data
+        for group in groups:
+            if len(group) < 2:
+                continue
+            survivor = group[0]
+            for block in range(3):
+                off = block * e
+                surv_sl = slice(off + survivor * hd, off + (survivor + 1) * hd)
+                stacked = torch.stack(
+                    [w[off + g * hd : off + (g + 1) * hd] for g in group]
+                )
+                w[surv_sl] = stacked.mean(dim=0)
+                if b is not None:
+                    stacked_b = torch.stack(
+                        [b[off + g * hd : off + (g + 1) * hd] for g in group]
+                    )
+                    b[surv_sl] = stacked_b.mean(dim=0)
+            surv_cols = slice(survivor * hd, (survivor + 1) * hd)
+            out_w[:, surv_cols] = torch.stack(
+                [out_w[:, g * hd : (g + 1) * hd] for g in group], dim=0
+            ).sum(dim=0)
+        return _redundant_idxs_from_groups(groups)
+
+    def merge_inputs(self, groups: list[list[int]]) -> list[int]:
+        """No-op merge for inputs.
+
+        Head merging acts on the attention's own packed projection /
+        out_proj weights via :meth:`merge_outputs`; there is no separate
+        input-side weight to combine.
+        """
+        return _redundant_idxs_from_groups(groups)
+
+    def destroy_outputs(self, idxs: list[int]):
+        """Remove heads ``idxs``: drop their Q/K/V rows, bias slices, out cols.
+
+        Decrements ``num_heads`` and ``embed_dim`` and asserts
+        ``embed_dim % num_heads == 0`` afterwards (analogous to GroupNorm).
+        """
+        layer = self.data.module
+        e = layer.embed_dim
+        hd = self._hd()
+        num_heads = layer.num_heads
+
+        keep_heads = sorted(set(range(num_heads)) - set(idxs))
+        new_num_heads = num_heads - len(idxs)
+        new_e = e - len(idxs) * hd
+
+        # Rows to keep within the packed (3*E, E) tensor, block by block.
+        keep_rows: list[int] = []
+        for block in range(3):
+            off = block * e
+            for head in keep_heads:
+                keep_rows.extend(range(off + head * hd, off + (head + 1) * hd))
+        # Columns kept on the embed (input) dimension.
+        keep_cols: list[int] = []
+        for head in keep_heads:
+            keep_cols.extend(range(head * hd, (head + 1) * hd))
+
+        new_in_proj_w = layer.in_proj_weight.data.clone()[keep_rows][:, keep_cols]
+        layer.in_proj_weight = torch.nn.Parameter(new_in_proj_w)
+        if layer.in_proj_bias is not None:
+            layer.in_proj_bias = torch.nn.Parameter(
+                layer.in_proj_bias.data.clone()[keep_rows]
+            )
+
+        # out_proj is Linear(E, E): drop both the column-blocks (inputs, the
+        # per-head concat) and the rows (its outputs are the embed dim).
+        out_proj = layer.out_proj
+        new_out_w = out_proj.weight.data.clone()[keep_cols][:, keep_cols]
+        out_proj.weight = torch.nn.Parameter(new_out_w)
+        out_proj.in_features = new_e
+        out_proj.out_features = new_e
+        if out_proj.bias is not None:
+            out_proj.bias = torch.nn.Parameter(out_proj.bias.data.clone()[keep_cols])
+
+        layer.num_heads = new_num_heads
+        layer.embed_dim = new_e
+        layer.kdim = new_e
+        layer.vdim = new_e
+        layer.head_dim = hd
+
+        assert layer.embed_dim % layer.num_heads == 0, (
+            "MultiheadAttention embed_dim must remain divisible by num_heads "
+            "after destroy"
+        )
+        return keep_heads, idxs
+
+    destroy_inputs = destroy_outputs
+
+
+# =============================================================================
 # Edges and graph types
 # =============================================================================
 
@@ -1022,12 +1175,21 @@ class GroupGraph(graph_core):
                 continue
             visited.add(node)
 
+            # Aliased nodes (BatchNorm/GroupNorm/LayerNorm/AttentionNode) set
+            # `destroy_inputs = destroy_outputs` (and merge likewise) because
+            # their input and output dims are the same neurons. On an interior
+            # node both the output and input branches fire, so guard against
+            # double-applying the surgery — mirrors `destroy()`.
+            single_dim = node.destroy_outputs.__func__ is node.destroy_inputs.__func__
+            redundant = _redundant_idxs_from_groups(node_groups)
+            called_outputs = False
             if node not in leaves:
                 node.merge_outputs(node_groups)
-                node.destroy_outputs(_redundant_idxs_from_groups(node_groups))
-            if node not in roots:
+                node.destroy_outputs(redundant)
+                called_outputs = True
+            if node not in roots and not (single_dim and called_outputs):
                 node.merge_inputs(node_groups)
-                node.destroy_inputs(_redundant_idxs_from_groups(node_groups))
+                node.destroy_inputs(redundant)
 
     def linked_neurons(self):
         leaves = self.leaves()
@@ -1080,10 +1242,27 @@ class ModuleGraph(Graph):
         self.model = model
         self._visit_count = dict.fromkeys(model.modules(), 0)
 
+        # nn.MultiheadAttention is not a leaf (it owns an ``out_proj`` Linear
+        # child) and its QKV projection is functional (``in_proj_weight`` is a
+        # bare Parameter, not a submodule), so it would never surface as a
+        # single graph node. Hook the whole MHA explicitly and SKIP its
+        # ``out_proj`` child so the entire module maps to exactly one
+        # ModuleData node instead of leaking an interior Linear node.
+        mha_modules = [
+            module
+            for module in model.modules()
+            if isinstance(module, torch.nn.MultiheadAttention)
+        ]
+        skip_modules = {id(m.out_proj) for m in mha_modules}
+
         hooks = [
             module.register_forward_hook(self)
             for module in model.modules()
-            if not list(module.children())
+            if (
+                not list(module.children())
+                or isinstance(module, torch.nn.MultiheadAttention)
+            )
+            and id(module) not in skip_modules
         ]
 
         self._block_hook = False
@@ -1209,4 +1388,13 @@ class ModuleGraph(Graph):
         self._visit_count[module] += 1
         if isinstance(outputs, tuple):
             outputs = outputs[0]
-        self._grad_trace[outputs.grad_fn] = module
+        grad_fn = outputs.grad_fn
+        # An eval-mode ``nn.Dropout`` (and other pass-through ops) is the
+        # identity: it returns the *same* tensor, so its output grad_fn is the
+        # exact grad_fn object produced by the preceding module. A Dropout that
+        # immediately follows a MultiheadAttention block would otherwise clobber
+        # the MHA's entry here and steal its node. MHA owns its grad_fn — never
+        # let a later pass-through alias overwrite it.
+        if isinstance(self._grad_trace.get(grad_fn), torch.nn.MultiheadAttention):
+            return
+        self._grad_trace[grad_fn] = module
