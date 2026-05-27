@@ -1,6 +1,7 @@
 import abc
 import contextlib
 import logging
+import threading
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import ClassVar
@@ -47,10 +48,12 @@ class AbstractStateCapture(abc.ABC):
 
     capture_on: bool = True
     memory_device: str | int
+    raise_on_capture_error: bool = False
     _chunk_size: int = 0
     _state_shape: tuple
     _entropy: float | None = None
     _state_count: int = 0
+    _capture_error: BaseException | None = None
 
     @property
     def state_count(self):
@@ -109,6 +112,8 @@ class AbstractStateCapture(abc.ABC):
         disk_path=None,
         memory_device: str | int | None = None,
         gpu_buffer_size: float = 256.0,
+        *,
+        raise_on_capture_error: bool = False,
         **kwargs,
     ):
         """Abstract State Capture Layer.
@@ -128,10 +133,19 @@ class AbstractStateCapture(abc.ABC):
                 transfers at the cost of more VRAM. Independent of the zarr
                 on-disk chunk size. Defaults to 256 MB. Ignored when
                 ``memory_device`` resolves to ``"cpu"``.
+            raise_on_capture_error: When ``True``, a capture failure aborts the
+                next capture call by re-raising the stored error (fail-fast).
+                When ``False`` (the default), capture failures are logged when
+                they occur and re-raised only when results are read
+                (``state_count`` / ``states`` / ``counts`` / ``entropy``), so a
+                single bad batch never aborts a long training run.
             **kwargs: Keyword arguments. Used for passing arguments to other
                 classes that inherit from AbstractStateCapture.
         """
         self._executor = ThreadPoolExecutor(4)
+        self._capture_error = None
+        self._capture_error_lock = threading.Lock()
+        self.raise_on_capture_error = raise_on_capture_error
 
         # Assign a name to the layer. Some inheriting classes make name
         # protected, so catch the error just in case.
@@ -176,11 +190,55 @@ class AbstractStateCapture(abc.ABC):
             self._gpu_buffer_mb,
         )
 
+    def _record_capture_error(self, exc: BaseException) -> None:
+        """Store the first capture failure (sticky) and log it once.
+
+        Logged by whichever path records it first — the done-callback (so the
+        failure surfaces during the forward pass even if results are never
+        read) or the read path (so a read is guaranteed to have logged before
+        it re-raises). Only the first failure logs, to avoid flooding the log
+        when every batch fails for the same reason.
+        """
+        with self._capture_error_lock:
+            if self._capture_error is not None:
+                return
+            self._capture_error = exc
+        logger.error(
+            "State capture failed in probe %r: %s",
+            getattr(self, "name", "<unnamed>"),
+            exc,
+            exc_info=exc,
+        )
+
+    def _on_capture_done(self, future: Future) -> None:
+        """Done-callback: surface a capture-thread failure when it happens.
+
+        Runs as soon as the capture thread finishes, so the failure lands in
+        the logs during the forward pass rather than only when results are
+        later read (or never, if they aren't).
+        """
+        exc = future.exception()
+        if exc is not None:
+            self._record_capture_error(exc)
+
+    def _raise_capture_error(self) -> None:
+        if self._capture_error is not None:
+            raise RuntimeError(
+                "State capture failed in probe "
+                f"{getattr(self, 'name', '<unnamed>')!r}; the original error is "
+                "chained below. Captured state is incomplete."
+            ) from self._capture_error
+
     def _wait_for_threads(self):
         wait(self._threads)
         for thread in self._threads:
-            thread.result()
+            # thread.exception() blocks until done and returns the exception
+            # (or None) without re-raising; the done-callback already logged it.
+            exc = thread.exception()
+            if exc is not None:
+                self._record_capture_error(exc)
         self._threads = []
+        self._raise_capture_error()
 
     def _compress_and_store(self, inputs):
         # Calculate the number of states to process
@@ -330,6 +388,7 @@ class AbstractStateCapture(abc.ABC):
         self._chunk_size = (nrows, ncols)
         self._state_shape = list(self._chunk_size)
         self._state_count = 0
+        self._capture_error = None
 
         if self._raw_states is not None:
             # Zero out states and resize if zarr already open
@@ -535,12 +594,25 @@ class StateCaptureHook(AbstractStateCapture, Probe):
     module's forward path.
     """
 
-    def __init__(self, name, disk_path=None, memory_device=None, **kwargs):
+    def __init__(
+        self,
+        name,
+        disk_path=None,
+        memory_device=None,
+        *,
+        raise_on_capture_error=False,
+        **kwargs,
+    ):
         # nn.Module.__init__ must run before any buffer/submodule
         # assignment, so initialize the Probe (nn.Module) side first.
         Probe.__init__(self)
         AbstractStateCapture.__init__(
-            self, name, disk_path, memory_device=memory_device, **kwargs
+            self,
+            name,
+            disk_path,
+            memory_device=memory_device,
+            raise_on_capture_error=raise_on_capture_error,
+            **kwargs,
         )
 
         # Transient GPU cache as a non-persistent buffer: it travels with
@@ -566,6 +638,11 @@ class StateCaptureHook(AbstractStateCapture, Probe):
         the last positional argument (output for post-hooks, inputs for
         pre-hooks), preserving the prior bare-callable behavior.
         """
+        # Fail-fast: if a previous capture failed and the caller opted in,
+        # abort this capture by re-raising the stored error.
+        if self.raise_on_capture_error:
+            self._raise_capture_error()
+
         if self._input_shape is None:
             self.reset_states(tuple(args[-1].shape))
 
@@ -576,5 +653,8 @@ class StateCaptureHook(AbstractStateCapture, Probe):
         dim_order = (0, *(i for i in range(2, args[-1].ndim)), 1)
         inputs = args[-1].detach().permute(*dim_order).contiguous()
 
-        # Store the data using a thread
-        self._threads.append(self._executor.submit(self._thread, inputs))
+        # Store the data using a thread. The done-callback surfaces any
+        # failure in the logs as soon as the thread finishes.
+        future = self._executor.submit(self._thread, inputs)
+        future.add_done_callback(self._on_capture_done)
+        self._threads.append(future)

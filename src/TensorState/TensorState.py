@@ -167,7 +167,13 @@ def reset_efficiency_model(model):
 
 
 def _pt_efficiency_model(
-    model, attach_to, exclude, method, storage_path, memory_device
+    model,
+    attach_to,
+    exclude,
+    method,
+    storage_path,
+    memory_device,
+    raise_on_capture_error,
 ):
     model.efficiency_layers = []
     model.state_capture_hooks = []
@@ -202,6 +208,7 @@ def _pt_efficiency_model(
                 name=str(mod_name) + "_pre_states",
                 disk_path=storage_path,
                 memory_device=memory_device,
+                raise_on_capture_error=raise_on_capture_error,
             )
             model._tensorstate_probes[f"{base_key}_pre"] = efficiency_layer
             model.efficiency_layers.append(efficiency_layer)
@@ -215,6 +222,7 @@ def _pt_efficiency_model(
                 name=str(mod_name) + "_post_states",
                 disk_path=storage_path,
                 memory_device=memory_device,
+                raise_on_capture_error=raise_on_capture_error,
             )
             model._tensorstate_probes[f"{base_key}_post"] = efficiency_layer
             model.efficiency_layers.append(efficiency_layer)
@@ -233,6 +241,8 @@ def build_efficiency_model(
     method="after",
     storage_path=None,
     memory_device: str | int = "cpu",
+    *,
+    raise_on_capture_error: bool = False,
 ):
     """Attach state capture methods to a neural network.
 
@@ -255,6 +265,10 @@ def build_efficiency_model(
             states are stored in memory. Defaults to None.
         memory_device: "cpu" or "gpu". When "gpu" and torch.cuda is available,
             the state cache is held on GPU before transferring to main memory.
+        raise_on_capture_error: When True, a capture failure aborts the next
+            forward pass through a probe by re-raising the stored error. When
+            False (the default), capture failures are logged when they occur
+            and re-raised only when results are read. Defaults to False.
 
     Returns:
         model: The same model with state-capture hooks attached.
@@ -281,7 +295,13 @@ def build_efficiency_model(
         or class_module.get("lightning.pytorch.core.module") == "LightningModule"
     ):
         new_model = _pt_efficiency_model(
-            model, attach_to, exclude, method, storage_path, memory_device
+            model,
+            attach_to,
+            exclude,
+            method,
+            storage_path,
+            memory_device,
+            raise_on_capture_error,
         )
     else:
         raise TypeError(
