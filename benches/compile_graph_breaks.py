@@ -74,6 +74,26 @@ def _time(model, x, *, compiled: bool, iters: int) -> float:
         return (time.perf_counter() - t0) / iters * 1000.0
 
 
+def _compiled_probe_capture(x, iters: int) -> tuple[float, int]:
+    """Time the compiled+probed model AND verify it actually captured states.
+
+    A clean graph break would let the eager hook still capture; if capture is
+    broken under compile the returned count is 0 (or this raises, if dynamo
+    crashes on the untraceable store path).
+    """
+    model = _build(probes=True)
+    cm = torch.compile(model, mode="reduce-overhead")
+    with torch.no_grad():
+        cm(x)
+        cm(x)
+        t0 = time.perf_counter()
+        for _ in range(iters):
+            cm(x)
+        ms = (time.perf_counter() - t0) / iters * 1000.0
+    captured = sum(p.state_count for p in ts.layers(model).values())
+    return ms, captured
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--batch", type=int, default=8)
@@ -116,24 +136,31 @@ def main() -> int:
     comp_bare, e3 = _safe(
         lambda: _time(_build(probes=False), x, compiled=True, iters=args.iters)
     )
-    comp_probe, e4 = _safe(
-        lambda: _time(_build(probes=True), x, compiled=True, iters=args.iters)
-    )
+    probe_res, e4 = _safe(lambda: _compiled_probe_capture(x, args.iters))
 
     print("\ngraph breaks:")
     print(f"  no probes: {bare_breaks if e1 is None else 'FAILED — ' + e1}")
     print(f"  probes:    {probe_breaks if e2 is None else 'FAILED — ' + e2}")
     print("compiled step time (ms/iter):")
     print(f"  no probes: {f'{comp_bare:.3f}' if e3 is None else 'FAILED — ' + e3}")
-    print(f"  probes:    {f'{comp_probe:.3f}' if e4 is None else 'FAILED — ' + e4}")
-    if e2 or e4:
+    if e4 is None:
+        comp_probe_ms, captured = probe_res
+        print(f"  probes:    {comp_probe_ms:.3f}  (captured {captured} states)")
+    else:
+        captured = 0
+        print(f"  probes:    FAILED — {e4}")
+
+    if e2 or e4 or captured == 0:
         print(
-            "\nFinding: with probes attached the capture hook is traced by "
-            "TorchDynamo and is NOT dynamo-safe — the host-side bit-pack/store "
-            "path crashes the trace rather than cleanly graph-breaking. "
-            "Mitigation: wrap the hook body in torch._dynamo.disable so it falls "
-            "back to eager. Revisit after the DuckDB storage migration, which "
-            "replaces the numcodecs/zarr write path implicated here."
+            "\nFinding: capture under torch.compile is BROKEN. With probes "
+            "attached the hook's host-side numpy/numcodecs store path is not "
+            "dynamo-traceable: torch._dynamo.explain crashes, and a compiled "
+            "forward either crashes or captures 0 states (eager captures "
+            "correctly). The AIQ-19 'graph break is acceptable' assumption does "
+            "NOT hold. Mitigation: wrap the hook body in torch._dynamo.disable "
+            "so it cleanly graph-breaks and the eager hook still captures. "
+            "Revisit after the DuckDB storage migration (it replaces the "
+            "numcodecs/zarr write path implicated in the crash)."
         )
     return 0
 
