@@ -22,6 +22,8 @@ dependencies = [
     "pydantic>=2.0,<3.0",
     "torch>=2.10.0,<2.11.0",
     "torchvision>=0.25.0,<0.26.0",
+    "duckdb>=1.5.3",
+    "pyarrow>=24.0.0",
 ]
 
 [project.optional-dependencies]
