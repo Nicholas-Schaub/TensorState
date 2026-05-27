@@ -13,7 +13,10 @@ from .States import compress_states, decompress_states, sort_states  # noqa
 from .TensorState import (  # noqa
     aIQ,
     build_efficiency_model,
+    efficiency,
     entropy,
+    layer,
+    layers,
     network_efficiency,
     reset_efficiency_model,
     zero_info,

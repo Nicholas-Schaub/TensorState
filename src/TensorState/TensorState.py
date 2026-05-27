@@ -1,10 +1,12 @@
 import logging
+import warnings
 from collections import OrderedDict
+from collections.abc import Iterator
 
 import numpy as np
 import torch
 
-from TensorState.Layers import StateCaptureHook
+from TensorState.Layers import Probe, StateCaptureHook
 
 logging.basicConfig(
     format="%(asctime)s - %(name)-10s - %(levelname)-8s - %(message)s",
@@ -75,9 +77,9 @@ def network_efficiency(efficiencies):
     Returns:
         The network efficiency
     """
-    # Extract efficiency values from a model with attached hooks
-    if hasattr(efficiencies, "efficiency_layers"):
-        efficiencies = [eff.efficiency() for eff in efficiencies.efficiency_layers]
+    # Extract efficiency values from a model with attached probes
+    if isinstance(efficiencies, torch.nn.Module):
+        efficiencies = [p.efficiency() for p in layers(efficiencies).values()]
     assert isinstance(efficiencies, list), (
         "Input must be a list or a module with attached state-capture hooks"
     )
@@ -123,7 +125,7 @@ def aIQ(net_efficiency, accuracy, weight):  # noqa: N802 -- public API: aIQ metr
     return np.power(accuracy**weight * net_efficiency, 1 / (weight + 1))
 
 
-def entropy(counts, alpha=1):
+def entropy(model_or_counts, alpha=1, name=None):
     """Calculate the Renyi entropy.
 
     The Renyi entropy is a general definition of entropy that encompasses
@@ -134,14 +136,35 @@ def entropy(counts, alpha=1):
 
     By default, this method sets alpha=1, which is Shannon's entropy.
 
+    This function has two forms:
+
+    - **Inspection form**: when the first argument is a model (a
+      ``torch.nn.Module`` with attached probes), returns a
+      ``dict[str, float]`` mapping probe name to layer entropy. Pass
+      ``name=`` to get the entropy of a single layer as a ``float``.
+    - **Count form** (legacy): when the first argument is a count array,
+      returns the entropy of those counts.
+
     Args:
-        counts: Array of counts representing number of times a state is
-            observed.
+        model_or_counts: A model with attached probes, or an array of counts
+            representing the number of times each state is observed.
         alpha: Entropy order. Defaults to 1.
+        name: When the first argument is a model, restrict to the single probe
+            with this name and return a ``float``. Invalid for the count form.
 
     Returns:
-        The entropy of the count data.
+        A ``dict[str, float]`` (model form), a ``float`` (model form with
+        ``name=`` or count form).
     """
+    if isinstance(model_or_counts, torch.nn.Module):
+        if name is not None:
+            return layer(model_or_counts, name).entropy(alpha)
+        return {n: p.entropy(alpha) for n, p in _iter_probes(model_or_counts)}
+
+    if name is not None:
+        raise TypeError("name= is only valid when the first argument is a model.")
+
+    counts = model_or_counts
     num_microstates = counts.sum()
     frequencies = counts / num_microstates
     if alpha == 1:
@@ -150,6 +173,122 @@ def entropy(counts, alpha=1):
         entropy = 1 / (1 - alpha) * np.log2((frequencies**alpha).sum())
 
     return entropy
+
+
+def _iter_probes(model) -> Iterator[tuple[str, Probe]]:
+    """Yield ``(clean_name, probe)`` for every probe attached to ``model``.
+
+    Walks ``model.named_modules()`` and filters for :class:`Probe`. The key is
+    the probe's own ``.name`` with the ``_pre_states``/``_post_states`` suffix
+    reduced to ``_pre``/``_post`` so callers key on the watched-layer name and
+    hook side (e.g. ``backbone.conv1_post``) rather than the internal container
+    key. Yields in attach order.
+    """
+    seen = set()
+    for module in model.modules():
+        if isinstance(module, Probe) and id(module) not in seen:
+            seen.add(id(module))
+            raw = getattr(module, "name", None) or "probe"
+            clean = raw[: -len("_states")] if raw.endswith("_states") else raw
+            yield clean, module
+
+
+def layers(model) -> dict[str, Probe]:
+    """Probes attached to a model, keyed by clean probe name.
+
+    Args:
+        model: A model that has been through ``build_efficiency_model``.
+
+    Returns:
+        ``dict[str, Probe]`` in attach order. Compose with the metric APIs via
+        ``{n: p.entropy() for n, p in ts.layers(m).items()}``; the keys line up
+        with the dicts returned by :func:`entropy` and :func:`efficiency`.
+    """
+    return dict(_iter_probes(model))
+
+
+def layer(model, name: str) -> Probe:
+    """Return the single attached probe named ``name``.
+
+    Args:
+        model: A model that has been through ``build_efficiency_model``.
+        name: Clean probe name (see :func:`layers`).
+
+    Raises:
+        KeyError: If no probe with that name is attached.
+
+    Returns:
+        The matching :class:`Probe`.
+    """
+    probes = layers(model)
+    try:
+        return probes[name]
+    except KeyError:
+        raise KeyError(
+            f"No probe named {name!r}. Attached probes: {sorted(probes)}"
+        ) from None
+
+
+def efficiency(model, alpha1=1, alpha2=None, reduce=None, name=None):
+    """Per-layer (or reduced) efficiency for a model with attached probes.
+
+    Args:
+        model: A model that has been through ``build_efficiency_model``.
+        alpha1: Order of Renyi entropy in the numerator. Defaults to 1.
+        alpha2: Order of Renyi entropy in the denominator. Defaults to None.
+        reduce: If ``None``, return a ``dict[str, float]`` of per-layer
+            efficiencies. If ``"geomean"``, return the geometric mean across
+            layers as a ``float`` (the network efficiency).
+        name: Restrict to the single probe with this name and return a
+            ``float``. Mutually exclusive with ``reduce``.
+
+    Raises:
+        ValueError: If ``reduce`` is neither ``None`` nor ``"geomean"``.
+
+    Returns:
+        ``dict[str, float]`` (default), or a ``float`` (with ``name=`` or
+        ``reduce="geomean"``).
+    """
+    if name is not None:
+        return layer(model, name).efficiency(alpha1, alpha2)
+
+    per_layer = {n: p.efficiency(alpha1, alpha2) for n, p in _iter_probes(model)}
+
+    if reduce is None:
+        return per_layer
+    if reduce == "geomean":
+        return network_efficiency(list(per_layer.values()))
+    raise ValueError(f"Unknown reduce={reduce!r}; expected 'geomean' or None.")
+
+
+class _DeprecatedProbeList(list):
+    """Back-compat shim for the retired ``model.efficiency_layers`` list.
+
+    Iterating, indexing, or taking the length emits a ``DeprecationWarning``
+    and resolves to the live probes via :func:`layers`. Slated for removal one
+    release after introduction; new code should use ``ts.layers(model)``.
+    """
+
+    def __init__(self, model):
+        super().__init__()
+        self._model = model
+
+    def _resolve(self) -> list[Probe]:
+        warnings.warn(
+            "model.efficiency_layers is deprecated; use TensorState.layers(model).",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        return list(layers(self._model).values())
+
+    def __iter__(self):
+        return iter(self._resolve())
+
+    def __len__(self):
+        return len(self._resolve())
+
+    def __getitem__(self, index):
+        return self._resolve()[index]
 
 
 def reset_efficiency_model(model):
@@ -162,8 +301,8 @@ def reset_efficiency_model(model):
     Args:
         model: Model to reset
     """
-    for layer in model.efficiency_layers:
-        layer.reset_states()
+    for probe in layers(model).values():
+        probe.reset_states()
 
 
 def _pt_efficiency_model(
@@ -175,7 +314,6 @@ def _pt_efficiency_model(
     memory_device,
     raise_on_capture_error,
 ):
-    model.efficiency_layers = []
     model.state_capture_hooks = []
     # Probes are owned here, off every module's forward path. Adding them
     # as children of the watched module would break container modules
@@ -211,7 +349,6 @@ def _pt_efficiency_model(
                 raise_on_capture_error=raise_on_capture_error,
             )
             model._tensorstate_probes[f"{base_key}_pre"] = efficiency_layer
-            model.efficiency_layers.append(efficiency_layer)
 
             model.state_capture_hooks.append(
                 module.register_forward_pre_hook(efficiency_layer._capture)
@@ -225,11 +362,13 @@ def _pt_efficiency_model(
                 raise_on_capture_error=raise_on_capture_error,
             )
             model._tensorstate_probes[f"{base_key}_post"] = efficiency_layer
-            model.efficiency_layers.append(efficiency_layer)
 
             model.state_capture_hooks.append(
                 module.register_forward_hook(efficiency_layer._capture)
             )
+
+    # Deprecated back-compat handle; new code should use TensorState.layers().
+    model.efficiency_layers = _DeprecatedProbeList(model)
 
     return model
 
