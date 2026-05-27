@@ -6,12 +6,117 @@ from concurrent.futures import Future, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import ClassVar
 
+import duckdb
 import numpy as np
+import pyarrow as pa
 import torch
-import zarr
 
 import TensorState
 import TensorState.States as ts  # noqa: N813 -- deliberate package alias
+
+# Stage this many rows in memory before flushing a batch to DuckDB. DuckDB is
+# slow at many tiny appends, so capture buffers and inserts in Arrow batches.
+_STORE_FLUSH_ROWS = 1 << 20
+
+
+class _StateStore:
+    """DuckDB-backed store for bit-packed microstates.
+
+    Each observed microstate is a row of ``ncols`` packed bytes, stored as a
+    single ``BLOB``. Counting unique microstates — the core analytical
+    operation — is a ``GROUP BY``, which DuckDB runs in parallel and out of
+    core with automatic spill-to-disk. Rows are staged in memory and inserted
+    in Arrow batches; all mutating operations are guarded by a lock because
+    capture runs on a small thread pool and a DuckDB connection is not safe
+    for concurrent use.
+    """
+
+    def __init__(
+        self,
+        ncols: int,
+        *,
+        path: str | None = None,
+        memory_limit: str | None = None,
+        flush_rows: int = _STORE_FLUSH_ROWS,
+    ) -> None:
+        self._ncols = int(ncols)
+        self._flush_rows = int(flush_rows)
+        self._lock = threading.Lock()
+        self._con = duckdb.connect(path if path is not None else ":memory:")
+        if memory_limit is not None:
+            self._con.execute(f"SET memory_limit='{memory_limit}'")
+        # CREATE OR REPLACE so reopening an on-disk database resets cleanly.
+        self._con.execute("CREATE OR REPLACE TABLE states (s BLOB)")
+        self._buffer: list[np.ndarray] = []
+        self._buffered = 0
+        self._count = 0
+        self._grouped: tuple[list[bytes], np.ndarray] | None = None
+
+    def append(self, rows: np.ndarray) -> None:
+        """Stage ``(k, ncols)`` uint8 rows; flush to DuckDB past the threshold."""
+        rows = np.ascontiguousarray(rows, dtype=np.uint8)
+        if rows.ndim != 2 or rows.shape[1] != self._ncols:
+            raise ValueError(
+                f"expected (k, {self._ncols}) uint8 rows, got shape {rows.shape}"
+            )
+        if rows.shape[0] == 0:
+            return
+        with self._lock:
+            self._buffer.append(rows)
+            self._buffered += rows.shape[0]
+            self._count += rows.shape[0]
+            self._grouped = None
+            if self._buffered >= self._flush_rows:
+                self._flush_locked()
+
+    def _flush_locked(self) -> None:
+        if not self._buffer:
+            return
+        arr = self._buffer[0] if len(self._buffer) == 1 else np.vstack(self._buffer)
+        n = arr.shape[0]
+        # Pack the contiguous (n, ncols) bytes as one fixed-size-binary buffer;
+        # DuckDB maps Arrow fixed_size_binary to BLOB.
+        fsb = pa.FixedSizeBinaryArray.from_buffers(
+            pa.binary(self._ncols), n, [None, pa.py_buffer(arr.tobytes())]
+        )
+        tbl = pa.table({"s": fsb})  # noqa: F841 -- referenced by replacement scan
+        self._con.execute("INSERT INTO states SELECT s FROM tbl")
+        self._buffer = []
+        self._buffered = 0
+
+    def count(self) -> int:
+        return self._count
+
+    def grouped(self) -> tuple[list[bytes], np.ndarray]:
+        """Return ``(unique_state_blobs, counts)`` via a single GROUP BY."""
+        with self._lock:
+            if self._grouped is None:
+                self._flush_locked()
+                rows = self._con.execute(
+                    "SELECT s, COUNT(*) FROM states GROUP BY s"
+                ).fetchall()
+                blobs = [bytes(r[0]) for r in rows]
+                counts = np.array([r[1] for r in rows], dtype=np.int64)
+                self._grouped = (blobs, counts)
+            return self._grouped
+
+    def raw_rows(self) -> np.ndarray:
+        """Materialize all stored states as a ``(n, ncols)`` uint8 array.
+
+        Insertion order is preserved. Used by the per-instance ``counts``
+        path; loads everything into memory, so it is not the out-of-core path.
+        """
+        with self._lock:
+            self._flush_locked()
+            rows = self._con.execute("SELECT s FROM states").fetchall()
+        if not rows:
+            return np.empty((0, self._ncols), dtype=np.uint8)
+        return np.stack([np.frombuffer(r[0], dtype=np.uint8) for r in rows])
+
+    def close(self) -> None:
+        with contextlib.suppress(Exception):
+            self._con.close()
+
 
 logging.basicConfig(
     format="%(asctime)s - %(name)-10s - %(levelname)-8s - %(message)s",
@@ -35,11 +140,11 @@ class AbstractStateCapture(abc.ABC):
     this layer can be thought of as a "probe", since it does not add or subtract
     from the function of a network.
 
-    Layer states are stored in a zarr array, which permits compressed storage of
-    data in memory or on disk. Only blosc compression is used to ensure fast
-    compression/decompression speeds. By default, data is stored in memory, but
-    data can be stored on disk to reduce memory consumption by using the
-    disk_path keyword.
+    Layer states are stored in a DuckDB-backed store, one bit-packed
+    microstate per row. Counting unique microstates is a ``GROUP BY``, which
+    DuckDB runs in parallel and out of core with automatic spill-to-disk. By
+    default the store is in memory; pass the ``disk_path`` keyword to back it
+    with an on-disk database instead.
 
     NOTE: This layer currently works with PyTorch ``nn.Module`` and Lightning
     ``LightningModule`` instances.
@@ -49,18 +154,14 @@ class AbstractStateCapture(abc.ABC):
     capture_on: bool = True
     memory_device: str | int
     raise_on_capture_error: bool = False
-    _chunk_size: int = 0
-    _state_shape: tuple
     _entropy: float | None = None
-    _state_count: int = 0
     _capture_error: BaseException | None = None
 
     @property
     def state_count(self):
         """Total number of observed states, including repeats."""
-        self._executor.submit(self._collect_cache())
-        self._wait_for_threads()
-        return self._state_count
+        self._drain()
+        return self._store.count()
 
     @state_count.setter
     def state_count(self, value):
@@ -68,14 +169,15 @@ class AbstractStateCapture(abc.ABC):
 
     @property
     def states(self):
-        """Decompressed state data."""
-        self._executor.submit(self._collect_cache())
-        self._wait_for_threads()
+        """Decompressed unique states as a boolean array."""
+        self._drain()
         if not isinstance(self._states, np.ndarray):
-            self._states = ts.decompress_states(
-                self.raw_states[self._index[self._edges[:-1]], :],
-                int(self.max_entropy()),
-            )
+            blobs, _ = self._store.grouped()
+            if blobs:
+                packed = np.stack([np.frombuffer(b, dtype=np.uint8) for b in blobs])
+            else:
+                packed = np.empty((0, self._store._ncols), dtype=np.uint8)
+            self._states = ts.decompress_states(packed, int(self.max_entropy()))
 
         return self._states
 
@@ -85,23 +187,21 @@ class AbstractStateCapture(abc.ABC):
 
     @property
     def raw_states(self):
-        """Raw state data as stored in memory, bit compressed."""
-        self._wait_for_threads()
-        return self._raw_states.oindex
+        """Raw bit-packed states as a ``(n, ncols)`` uint8 array (insertion order)."""
+        self._drain()
+        return self._store.raw_rows()
 
     @raw_states.setter
     def raw_states(self, value):
         raise AttributeError("states attribute is read-only.")
 
     _states = None
-    _raw_states = None
-    _index = None
-    _edges = None
-    _counts = None
+    _store: _StateStore | None = None
+    _db_path: str | None = None
+    _memory_limit: str | None = None
     _input_shape = None
     _state_ids = None
     _threads: ClassVar[list[Future]] = []
-    _zarr_path = None
     _channel_index = -1
     _state_cache_index = 0
     _gpu_buffer_mb: float = 256.0
@@ -120,8 +220,9 @@ class AbstractStateCapture(abc.ABC):
 
         Args:
             name: Name of the state capture layer.
-            disk_path: Path on disk to save captured states in zarr format.
-                Defaults to None.
+            disk_path: Directory under which to back the state store with an
+                on-disk DuckDB database. If None (the default), the store is
+                held in memory.
             memory_device: ``"cpu"``, ``"gpu"``, or a CUDA device index. When
                 set to ``"gpu"`` (or an int) and a CUDA-capable PyTorch is
                 available, captured states are accumulated in a GPU-resident
@@ -130,9 +231,8 @@ class AbstractStateCapture(abc.ABC):
                 available, otherwise ``"cpu"``.
             gpu_buffer_size: Size of the GPU-resident compressed-state buffer,
                 in megabytes. Larger buffers mean fewer device-to-host
-                transfers at the cost of more VRAM. Independent of the zarr
-                on-disk chunk size. Defaults to 256 MB. Ignored when
-                ``memory_device`` resolves to ``"cpu"``.
+                transfers at the cost of more VRAM. Defaults to 256 MB.
+                Ignored when ``memory_device`` resolves to ``"cpu"``.
             raise_on_capture_error: When ``True``, a capture failure aborts the
                 next capture call by re-raising the stored error (fail-fast).
                 When ``False`` (the default), capture failures are logged when
@@ -152,16 +252,18 @@ class AbstractStateCapture(abc.ABC):
         with contextlib.suppress(AttributeError):
             self.name = name
 
-        # Set up zarr, but don't create anything
+        # Resolve the on-disk DuckDB database path (None -> in-memory). The
+        # store itself is created in reset_states once the neuron count (and
+        # thus the packed-byte width) is known.
+        self._store = None
+        self._memory_limit = None
         if disk_path is not None:
-            if not isinstance(disk_path, Path):
-                self._zarr_path = Path(disk_path)
-            else:
-                self._zarr_path = disk_path
-            self._zarr_path = self._zarr_path.joinpath("tensor_states")
-            self._zarr_path.mkdir(exist_ok=True)
-            self._zarr_path = self._zarr_path.joinpath(name + ".zarr")
-            self._zarr_path.mkdir(exist_ok=False)
+            base = disk_path if isinstance(disk_path, Path) else Path(disk_path)
+            base = base / "tensor_states"
+            base.mkdir(parents=True, exist_ok=True)
+            self._db_path = str((base / (name + ".duckdb")).absolute())
+        else:
+            self._db_path = None
 
         # Default the memory device based on CUDA availability when the caller
         # did not specify one.
@@ -240,16 +342,21 @@ class AbstractStateCapture(abc.ABC):
         self._threads = []
         self._raise_capture_error()
 
-    def _compress_and_store(self, inputs):
-        # Calculate the number of states to process
-        num_states = int(np.prod(inputs.shape[0:-1]))
+    def _drain(self):
+        """Join capture threads and flush the GPU cache before a read.
 
-        # Reshape using the appropriate library
+        Read paths call this so a subsequent store query reflects every
+        captured state. Safe on the main thread: the workers are joined first,
+        so the GPU-cache flush runs single-threaded.
+        """
+        self._wait_for_threads()
+        self._collect_cache()
+
+    def _compress_and_store(self, inputs):
+        # Reshape to (num_states, num_neurons) using the matching library.
         if isinstance(inputs, torch.Tensor):
-            logger.debug("_compress_and_store: torch.reshape")
             states = inputs.reshape(-1, int(inputs.shape[-1]))
         else:
-            logger.debug("_compress_and_store: numpy.reshape")
             states = np.reshape(inputs, (-1, int(inputs.shape[-1])))
 
         # Compress states. Output backend matches input: numpy for numpy,
@@ -260,71 +367,34 @@ class AbstractStateCapture(abc.ABC):
         # to main memory in chunks.
         if self.memory_device != "cpu" and isinstance(states, torch.Tensor):
             if self._state_cache_index + states.shape[0] > self._state_cache.shape[0]:
-                logger.debug(
-                    "_compress_and_store: GPU cache full, collecting and "
-                    "sending to main memory."
-                )
                 if self._state_cache_index > 0:
                     states = torch.vstack(
                         (self._state_cache[: self._state_cache_index], states)
                     )
-                num_states += self._state_cache_index
                 self._state_cache_index = 0
             else:
-                logger.debug("_compress_and_store: Caching states on GPU.")
                 self._state_cache[
                     self._state_cache_index : self._state_cache_index + states.shape[0]
                 ] = states
                 self._state_cache_index += states.shape[0]
                 return True
 
-        # Move any torch tensor to numpy before zarr write.
+        # Move any torch tensor to numpy before the store write.
         if isinstance(states, torch.Tensor):
-            logger.debug("_compress_and_store: torch -> numpy")
             states = states.cpu().numpy()
 
-        # Resize the zarr array if needed
-        if 2 * num_states + self._state_count >= self._raw_states.shape[0]:
-            self._state_shape[0] += max(self._chunk_size[0], 2 * num_states)
-            self._raw_states.resize(self._state_shape)
-
-        # Store numpy array
-        logger.debug("_compress_and_store: zarr storage")
-        self._raw_states[self._state_count : self._state_count + num_states] = states
-        self._state_count += num_states
-
-        # Reset the _counts and _state_ids so they are recalculated
-        logger.debug("_compress_and_store: reset bins")
-        self._counts = None
-        self._state_ids = None
-        self._states = None
-
+        self._store.append(states)
+        self._states = None  # invalidate the decompressed-states cache
         return True
 
     def _collect_cache(self):
-        logger.debug("_collect_cache: torch -> numpy")
+        """Flush any GPU-resident cached states to the store."""
         if self._state_cache_index == 0 or self._state_cache is None:
             return True
-
-        num_states = self._state_cache_index
-        states = self._state_cache[:num_states].cpu().numpy()
-
-        # Resize the zarr array if needed
-        if 2 * num_states + self._state_count >= self._raw_states.shape[0]:
-            self._state_shape[0] += self._chunk_size[0]
-            self._raw_states.resize(self._state_shape)
-
-        # Store numpy array
-        logger.debug("_collect_cache: zarr storage")
-        self._raw_states[self._state_count : self._state_count + num_states] = states
-        self._state_count += num_states
-
-        # Reset the _counts and _state_ids so they are recalculated
-        logger.debug("_collect_cache: reset bins")
-        self._counts = None
-        self._state_ids = None
+        states = self._state_cache[: self._state_cache_index].cpu().numpy()
+        self._state_cache_index = 0
+        self._store.append(states)
         self._states = None
-
         return True
 
     def states_per_instance(self):
@@ -356,13 +426,13 @@ class AbstractStateCapture(abc.ABC):
         return state_indices.flatten()
 
     def reset_states(self, input_shape=None):
-        """Initialize the state space.
+        """Initialize the state space, resetting any previously held data.
 
-        This method initializes the layer and resets any previously held data.
-        The zarr array is initialized in this method.
+        Creates (or recreates) the DuckDB-backed state store. The first call
+        must provide ``input_shape``.
 
         Args:
-            input_shape (TensorShape,tuple, list): Shape of the input.
+            input_shape (TensorShape, tuple, list): Shape of the input.
         """
         if input_shape is not None:
             self._input_shape = input_shape
@@ -374,62 +444,36 @@ class AbstractStateCapture(abc.ABC):
                 "called, an input_shape must be provided."
             )
 
-        # Try to keep chunks limited to 16MB
+        # Packed-byte width: one bit per neuron, 8 neurons per byte.
         ncols = int(np.ceil(self._input_shape[self._channel_index] / 8))
-        nrows = 2**22 // ncols
 
-        # Initialize internal variables related to state space
         self._state_ids = None
-        self._edges = None
-        self._index = None
-        self._counts = None
+        self._states = None
         self._entropy = None
         self._threads = []
-        self._chunk_size = (nrows, ncols)
-        self._state_shape = list(self._chunk_size)
-        self._state_count = 0
         self._capture_error = None
 
-        if self._raw_states is not None:
-            # Zero out states and resize if zarr already open
-            self._raw_states.resize(self._state_shape)
-            self._raw_states[:] = 0
-        else:
-            # Initialize the zarr array
-            if self._zarr_path is not None:
-                if self._zarr_path.is_file():
-                    self._zarr_path.unlink()
+        # (Re)create the state store.
+        if self._store is not None:
+            self._store.close()
+        self._store = _StateStore(
+            ncols, path=self._db_path, memory_limit=self._memory_limit
+        )
 
-                self._raw_states = zarr.zeros(
-                    shape=self._state_shape,
-                    chunks=self._chunk_size,
-                    dtype="B",
-                    synchronizer=zarr.ThreadSynchronizer(),
-                    store=str(self._zarr_path.absolute()),
-                )
-            else:
-                self._raw_states = zarr.zeros(
-                    shape=self._state_shape,
-                    chunks=self._chunk_size,
-                    dtype="B",
-                    synchronizer=zarr.ThreadSynchronizer(),
-                )
-
+        # GPU cache: hold compressed bytes on device before flushing to the
+        # store in batches. Sized from the MB budget, floored so we never
+        # buffer less than a reasonable batch between flushes.
+        chunk_rows = 2**22 // ncols
         if (
             self.memory_device != "cpu"
             and input_shape is not None
-            and input_shape[0] < self._chunk_size[0]
+            and input_shape[0] < chunk_rows
         ):
             if self._state_cache is None:
                 device_idx = (
                     self.memory_device if isinstance(self.memory_device, int) else 0
                 )
-                # GPU buffer rows from the MB budget, floored at one zarr
-                # chunk so we never buffer less than a chunk between flushes.
-                buffer_rows = max(
-                    self._chunk_size[0],
-                    int(self._gpu_buffer_mb * 2**20 // ncols),
-                )
+                buffer_rows = max(chunk_rows, int(self._gpu_buffer_mb * 2**20 // ncols))
                 self._state_cache = torch.zeros(
                     (buffer_rows, ncols),
                     dtype=torch.uint8,
@@ -456,17 +500,11 @@ class AbstractStateCapture(abc.ABC):
         Returns:
             Unique states observed by the layer
         """
-        if not isinstance(self._state_ids, list):
-            self.counts()
-            self._state_ids = []
-            states = self.raw_states[self._index[self._edges[:-1]], :].tobytes()
-            delta = int((self.max_entropy() - 1) // 8 + 1)
-            for cindex in range(0, delta * (self._edges.shape[0] - 1), delta):
-                self._state_ids.append(states[cindex : cindex + delta])
+        self._drain()
+        # Aligned with counts(): both read the same cached GROUP BY result.
+        return list(self._store.grouped()[0])
 
-        return self._state_ids
-
-    def counts(self, index: int | list[int] | np.ndarray | None = None) -> list[int]:
+    def counts(self, index: int | list[int] | np.ndarray | None = None) -> np.ndarray:
         """Layer state counts.
 
         This method returns a numpy.array of integers, where each integer is the
@@ -483,25 +521,17 @@ class AbstractStateCapture(abc.ABC):
         Returns:
             Counts of stat occurrences
         """
-        if not isinstance(self._counts, np.ndarray) or index is not None:
-            if index is None:
-                rows = slice(0, self.state_count)
-                count = self.state_count
-            else:
-                rows = self._instance_indices(index)  # type: ignore
-                count = rows.size  # type: ignore
+        self._drain()
+        if index is None:
+            # Out-of-core unique-microstate count via DuckDB GROUP BY.
+            return self._store.grouped()[1]
 
-            # Create the index and sort the data to find the bin edges
-            _edges, _index = ts.sort_states(self.raw_states[rows, :], count)
-            _counts = np.diff(_edges)
-
-            if index is None:
-                self._edges, self._index = _edges, _index
-                self._counts = _counts
-
-            return _counts
-
-        return self._counts
+        # Per-instance counts: materialize the instance's rows and count
+        # unique microstates among them with numpy.
+        rows = self._instance_indices(index)  # type: ignore
+        subset = self._store.raw_rows()[rows, :]
+        _, counts = np.unique(subset, axis=0, return_counts=True)
+        return counts
 
     def max_entropy(self):
         """Theoretical maximum entropy for the layer.

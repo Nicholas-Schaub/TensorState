@@ -1,9 +1,32 @@
+import numpy as np
 import pytest
 import torch
 
 import TensorState as ts  # noqa: N813 -- deliberate package alias
 from TensorState import testing as ts_testing
 from TensorState.Layers import StateCaptureHook
+
+
+def test_duckdb_store_counts_match_numpy():
+    """DuckDB GROUP BY counting must match a numpy reference (AIQ-36/37)."""
+    model = ts_testing.small_model("lenet5", num_classes=10)
+    ts.build_efficiency_model(model, attach_to=["Conv2dNormActivation"])
+    model.eval()
+    with torch.no_grad():
+        model(torch.randn(8, 3, 64, 64))
+
+    probes = ts.layers(model)
+    assert probes
+    for probe in probes.values():
+        assert isinstance(probe, StateCaptureHook)
+        counts = probe.counts()
+        ids = probe.state_ids()
+        # state_ids and counts are aligned, and counts sum to the total.
+        assert len(ids) == len(counts)
+        assert int(counts.sum()) == probe.state_count
+        # The GROUP BY counts must match unique-row counts computed by numpy.
+        _, ref = np.unique(probe.raw_states, axis=0, return_counts=True)
+        assert sorted(counts.tolist()) == sorted(ref.tolist())
 
 
 def test_capture_under_torch_compile():

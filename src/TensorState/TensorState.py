@@ -470,7 +470,12 @@ def remove_state_layers(model) -> None:
         del model.efficiency_layers
 
     # Drop the probe container (probes live here, off the forward path).
+    # Close each probe's state store first so on-disk DuckDB files are released.
     if hasattr(model, "_tensorstate_probes"):
+        for probe in model._tensorstate_probes.values():
+            store = getattr(probe, "_store", None)
+            if store is not None:
+                store.close()
         del model._tensorstate_probes
 
     for _name, child in model._modules.items():
