@@ -7,6 +7,7 @@ opt-in fail-fast flag.
 """
 
 import logging
+import threading
 from concurrent.futures import wait as futures_wait
 
 import pytest
@@ -38,6 +39,13 @@ def test_capture_failure_logged_and_reraised_on_read(monkeypatch, caplog):
 
     with caplog.at_level(logging.ERROR, logger="TensorState.Layers"):
         hook._capture(None, torch.randn(8, 16))
+        # The failure is logged by the capture thread's done-callback. Add our
+        # own callback after the hook's so callbacks fire in registration order
+        # — when ours signals, the hook's has already run and logged. This makes
+        # the log assertion deterministic instead of racing the worker thread.
+        done = threading.Event()
+        hook._threads[-1].add_done_callback(lambda _f: done.set())
+        assert done.wait(timeout=10), "capture thread did not finish"
         with pytest.raises(RuntimeError) as excinfo:
             _ = hook.state_count
 
