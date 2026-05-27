@@ -630,6 +630,7 @@ class StateCaptureHook(AbstractStateCapture, Probe):
             tensor = (tensor > 0).cpu().numpy()
         self._compress_and_store(tensor)
 
+    @torch._dynamo.disable
     def _capture(self, *args):
         """Forward-hook callable registered on the watched module.
 
@@ -637,6 +638,12 @@ class StateCaptureHook(AbstractStateCapture, Probe):
         forward-pre-hook ``(module, inputs)`` signatures by operating on
         the last positional argument (output for post-hooks, inputs for
         pre-hooks), preserving the prior bare-callable behavior.
+
+        Marked ``torch._dynamo.disable`` so that under ``torch.compile`` the
+        hook triggers a clean graph break and runs eagerly. Without this,
+        TorchDynamo tries to trace the host-side bit-pack / store path
+        (numpy / numcodecs), which it cannot, and silently captures nothing
+        (see benches/compile_graph_breaks.py / AIQ-22).
         """
         # Fail-fast: if a previous capture failed and the caller opted in,
         # abort this capture by re-raising the stored error.

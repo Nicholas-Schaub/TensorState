@@ -59,11 +59,14 @@ def _compile_available() -> str | None:
 
 
 def _graph_breaks(model, x) -> int:
+    torch._dynamo.reset()  # independent compile per cell; avoid cache reuse
     explanation = torch._dynamo.explain(model)(x)
     return int(explanation.graph_break_count)
 
 
 def _time(model, x, *, compiled: bool, iters: int) -> float:
+    if compiled:
+        torch._dynamo.reset()
     m = torch.compile(model, mode="reduce-overhead") if compiled else model
     with torch.no_grad():
         m(x)  # warm up (compiles on first call)
@@ -81,6 +84,7 @@ def _compiled_probe_capture(x, iters: int) -> tuple[float, int]:
     broken under compile the returned count is 0 (or this raises, if dynamo
     crashes on the untraceable store path).
     """
+    torch._dynamo.reset()  # don't reuse a hookless graph compiled for a prior cell
     model = _build(probes=True)
     cm = torch.compile(model, mode="reduce-overhead")
     with torch.no_grad():
