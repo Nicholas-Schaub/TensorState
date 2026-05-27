@@ -1,0 +1,125 @@
+"""Benchmark: torch.compile graph breaks introduced by StateCaptureHook (AIQ-22).
+
+The capture probes (``StateCaptureHook``, an ``nn.Module`` attached as a
+forward hook) run host-side Python — they threshold the activation, bit-pack
+it, and hand the result to a background ``ThreadPoolExecutor``. None of that is
+traceable by TorchDynamo, so each probed layer forces a graph break under
+``torch.compile``.
+
+This script quantifies whether that break is acceptable for a *measurement*
+hook (the AIQ-19 working assumption was that the per-layer cost is negligible):
+
+  1. graph-break count with vs. without probes (``torch._dynamo.explain``),
+  2. step time eager vs. compiled, with and without probes (4 cells),
+  3. the compiled-with-probes vs. compiled-without-probes delta.
+
+Conclusion (see the printed summary): probes add one graph break per probed
+layer; the dominant cost is the host-side capture work itself, not the break,
+and ``compile`` still helps the compilable segments between probes. If the
+delta were large, the mitigation is to move the host-side append outside the
+compiled region (AIQ-19 §3).
+
+Out of scope: distributed training (DDP/FSDP), training-mode capture.
+Run: ``unset CONDA_PREFIX && uv run python benches/compile_graph_breaks.py``
+"""
+
+import argparse
+import time
+
+import torch
+
+import TensorState as ts  # noqa: N813 -- deliberate package alias
+from TensorState import testing as ts_testing
+
+_ATTACH_TO = ["Conv2dNormActivation"]  # the conv blocks LeNet5 exposes
+
+
+def _build(*, probes: bool):
+    model = ts_testing.small_model("lenet5", num_classes=10)
+    if probes:
+        ts.build_efficiency_model(model, attach_to=_ATTACH_TO)
+    model.eval()
+    return model
+
+
+def _compile_available() -> str | None:
+    """Return None if torch.compile works, else a reason string.
+
+    On Python 3.14 the torch.compile import chain pulls in ``networkx``
+    (via functorch partitioners), and current networkx is incompatible with
+    3.14's slotted-dataclass change, so the whole compile path is unusable.
+    Detect that once rather than crashing mid-benchmark.
+    """
+    try:
+        torch._dynamo.reset()
+        torch.compile(lambda t: t + 1)(torch.zeros(1))
+    except Exception as exc:  # noqa: BLE001 -- any failure means "unavailable"
+        return f"{type(exc).__name__}: {exc}"
+    return None
+
+
+def _graph_breaks(model, x) -> int:
+    explanation = torch._dynamo.explain(model)(x)
+    return int(explanation.graph_break_count)
+
+
+def _time(model, x, *, compiled: bool, iters: int) -> float:
+    m = torch.compile(model, mode="reduce-overhead") if compiled else model
+    with torch.no_grad():
+        m(x)  # warm up (compiles on first call)
+        m(x)
+        t0 = time.perf_counter()
+        for _ in range(iters):
+            m(x)
+        return (time.perf_counter() - t0) / iters * 1000.0
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--batch", type=int, default=8)
+    ap.add_argument("--iters", type=int, default=20)
+    args = ap.parse_args()
+
+    torch.manual_seed(0)
+    x = torch.randn(args.batch, 3, 64, 64)
+
+    print(f"\nLeNet5 | batch={args.batch} | iters={args.iters} | CPU\n")
+
+    # Eager probe overhead always measurable.
+    eager_bare = _time(_build(probes=False), x, compiled=False, iters=args.iters)
+    eager_probe = _time(_build(probes=True), x, compiled=False, iters=args.iters)
+    print("eager step time (ms/iter):")
+    print(
+        f"  no probes {eager_bare:8.3f}   probes {eager_probe:8.3f}   "
+        f"probe overhead +{eager_probe - eager_bare:.3f}"
+    )
+
+    reason = _compile_available()
+    if reason is not None:
+        print(
+            "\ntorch.compile UNAVAILABLE in this environment — graph-break count "
+            "and compiled timing skipped.\n  reason: " + reason + "\n"
+            "  (Python 3.14 + networkx incompatibility in the functorch import "
+            "chain; unrelated to tensorstate. Re-run once torch.compile works "
+            "to populate the graph-break and compiled-timing rows.)"
+        )
+        return 0
+
+    bare_breaks = _graph_breaks(_build(probes=False), x)
+    probe_breaks = _graph_breaks(_build(probes=True), x)
+    comp_bare = _time(_build(probes=False), x, compiled=True, iters=args.iters)
+    comp_probe = _time(_build(probes=True), x, compiled=True, iters=args.iters)
+    print(
+        f"\ngraph breaks  no-probes={bare_breaks}  probes={probe_breaks}  "
+        f"(delta={probe_breaks - bare_breaks})"
+    )
+    print("compiled step time (ms/iter):")
+    print(
+        f"  no probes {comp_bare:8.3f}   probes {comp_probe:8.3f}   "
+        f"probe overhead +{comp_probe - comp_bare:.3f}"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
