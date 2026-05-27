@@ -262,7 +262,9 @@ def compress_states(states):
             return _ts._compress_tensor_ps(states)
         if states.dtype == np.bool_:
             logger.debug("compress_states: _compress_tensor_pi8")
-            return _ts._compress_tensor_pi8(states)
+            # The extension's pi8 path wants uint8; bool is 1 byte so this
+            # view is zero-copy and non-zero bytes are treated as firing.
+            return _ts._compress_tensor_pi8(states.view(np.uint8))
         raise TypeError("states must be numpy.float32 or numpy.bool_")
     if isinstance(states, torch.Tensor):
         logger.debug("compress_states: _compress_states_torch")
