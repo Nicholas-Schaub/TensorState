@@ -135,9 +135,7 @@ for epoch in range(num_epochs):
 
 """ Evaluate model efficiency """
 # Attach StateCapture layers to the model
-efficiency_model = ts.build_efficiency_model(
-    model, attach_to=["Conv2d"], method="after"
-)
+efficiency_model = ts.attach(model, ts.match(types=nn.Conv2d), when="after")
 
 # Collect the states for each layer
 print()
@@ -153,13 +151,13 @@ print(f"Finished in {time.time() - start:.3f}s!")
 # Count the number of states in each layer
 print()
 print("Getting the number of states in each layer...")
-for layer in efficiency_model.efficiency_layers:
+for layer in ts.layers(efficiency_model).values():
     print(f"Layer {layer.name} number of states: {layer.state_count}")
 
 # Calculate each layers efficiency
 print()
 print("Evaluating efficiency of each layer...")
-for layer in efficiency_model.efficiency_layers:
+for layer in ts.layers(efficiency_model).values():
     start = time.time()
     print(
         f"Layer {layer.name} efficiency: {100 * layer.efficiency():.1f}% ({time.time() - start:.3f}s)"

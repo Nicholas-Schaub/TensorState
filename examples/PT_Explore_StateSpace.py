@@ -146,9 +146,7 @@ else:
 
 """ Capture state space for each class """
 # Attach StateCapture layers to the model
-efficiency_model = ts.build_efficiency_model(
-    model, attach_to=["BatchNorm2d"], method="after"
-)
+efficiency_model = ts.attach(model, ts.match(types=nn.BatchNorm2d), when="after")
 efficiency_model.eval()
 
 # Calculate per class information
@@ -173,7 +171,7 @@ for c in range(10):
         )
 
     class_dict = {}
-    for layer in efficiency_model.efficiency_layers:
+    for layer in ts.layers(efficiency_model).values():
         print(f"Layer {layer.name} efficiency: {100 * layer.efficiency():.2f}%")
 
         # Store the states for each class

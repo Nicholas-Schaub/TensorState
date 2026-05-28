@@ -86,7 +86,7 @@ class LeNet5(nn.Module):
 # Create the PyTorch model, attach efficiency layers
 model = LeNet5().to(dev)
 model.eval()
-model = ts.build_efficiency_model(model, attach_to=["Conv2d"], method="after")
+model = ts.attach(model, ts.match(types=nn.Conv2d), when="after")
 
 """ Train the model """
 num_epochs = 100
@@ -133,15 +133,15 @@ for epoch in range(num_epochs):
             "train": {
                 "loss": train_loss.cpu().item(),
                 "accuracy": train_accuracy.cpu().item(),
-                "efficiency": [e.efficiency() for e in model.efficiency_layers],
+                "efficiency": [e.efficiency() for e in ts.layers(model).values()],
                 "net_efficiency": ts.network_efficiency(model),
             },
             "test": {},
         }
     )
     te = time.time() - te_start
-    # for e in model.efficiency_layers:
-    #     print(e._raw_states.info)
+    # for e in ts.layers(model).values():
+    #     print(e.state_count)
     ts.reset_efficiency_model(model)
 
     model.eval()
@@ -156,7 +156,7 @@ for epoch in range(num_epochs):
     efficiencies[-1]["test"]["loss"] = valid_loss.cpu().item()
     efficiencies[-1]["test"]["accuracy"] = valid_accuracy.cpu().item()
     efficiencies[-1]["test"]["efficiency"] = [
-        e.efficiency() for e in model.efficiency_layers
+        e.efficiency() for e in ts.layers(model).values()
     ]
     efficiencies[-1]["test"]["net_efficiency"] = ts.network_efficiency(model)
     ve = time.time() - ve_start
