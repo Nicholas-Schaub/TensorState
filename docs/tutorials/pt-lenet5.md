@@ -24,34 +24,21 @@ already rescaled to floats ranging between 0–1, so no rescaling is required.
 
 ```python
 from pathlib import Path
-import requests, pickle, gzip
 import torch
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import DataLoader
+from torchvision import datasets, transforms
 
 # Set up the directories
 DATA_PATH = Path("data")
 PATH = DATA_PATH / "mnist"
 PATH.mkdir(parents=True, exist_ok=True)
 
-# Download the data if it doesn't exist
-URL = "http://deeplearning.net/data/mnist/"
-FILENAME = "mnist.pkl.gz"
-if not (PATH / FILENAME).exists():
-    content = requests.get(URL + FILENAME).content
-    (PATH / FILENAME).open("wb").write(content)
+# Download MNIST if it doesn't exist; ToTensor() rescales pixels into [0, 1].
+train_ds = datasets.MNIST(PATH, train=True, download=True, transform=transforms.ToTensor())
+valid_ds = datasets.MNIST(PATH, train=False, download=True, transform=transforms.ToTensor())
 
-# Load the data
-with gzip.open((PATH / FILENAME).as_posix(), "rb") as f:
-    ((x_train, y_train), (x_valid, y_valid), _) = pickle.load(f, encoding="latin-1")
-
-    x_train, y_train, x_valid, y_valid = map(
-        torch.tensor, (x_train, y_train, x_valid, y_valid)
-    )
-
-    train_ds = TensorDataset(x_train, y_train)
-    train_dl = DataLoader(train_ds, batch_size=200, shuffle=True)
-    valid_ds = TensorDataset(x_valid, y_valid)
-    valid_dl = DataLoader(valid_ds, batch_size=200)
+train_dl = DataLoader(train_ds, batch_size=200, shuffle=True)
+valid_dl = DataLoader(valid_ds, batch_size=200)
 ```
 
 ### Create a LeNet-5 model
@@ -224,25 +211,30 @@ information passing through the network. The `StateCaptureHook` acts like a
 probe that can be placed anywhere in the network: it records the
 information without modifying it, and passes it on to subsequent layers.
 
-While `StateCaptureHook`'s can be placed manually, there is a convenience
-function that automatically adds hooks at the designated layers. For
-example, we can attach a `StateCaptureHook` to all convolutional layers.
+While `StateCaptureHook`'s can be placed manually, `ts.attach` adds hooks
+at the layers selected by a matcher. For example, we can attach a
+`StateCaptureHook` to all convolutional layers.
 
 ```python
 import TensorState as ts
 
-efficiency_model = ts.build_efficiency_model(
-    model, attach_to=["Conv2d"], method="after"
-)
+efficiency_model = ts.attach(model, ts.match(types=nn.Conv2d), when="after")
 ```
 
-In the above code, we feed the trained LeNet-5 model into the function,
-designate that we want to attach `StateCaptureHook`'s to all 2D
-convolutional layers, and we want to capture the states `after` the layer.
-We could also capture the inputs going into and out of the layer by using
-`method='both'`. For more information on the `build_efficiency_model`
-method and additional settings, please see the
-[TensorState reference](../reference/tensorstate.md).
+In the above code, we feed the trained LeNet-5 model into `ts.attach`,
+designate via `ts.match(types=nn.Conv2d)` that we want to attach
+`StateCaptureHook`'s to all 2D convolutional layers, and we want to
+capture the states `after` the layer. We could also capture the inputs
+going into and out of the layer by using `when='both'`. The matcher is
+composable (`|`, `&`, `~`) so you can target by type, name regex, or any
+custom check. For more information on `attach` and additional settings,
+please see the [TensorState reference](../reference/tensorstate.md).
+
+!!! note
+    The older `ts.build_efficiency_model(model, attach_to=["Conv2d"])`
+    call still works and dispatches to `ts.attach` internally. New code
+    should prefer `ts.attach`; `build_efficiency_model` will be removed
+    in a future release.
 
 Now that the `efficiency_model` has been created, the `StateCaptureHook`'s
 will collect all states of the network as images are fed to the network.
@@ -257,13 +249,12 @@ with torch.no_grad():
         *[epoch_func(xb.to(dev), yb.to(dev), False) for xb, yb in valid_dl]
     )
 
-for layer in efficiency_model.efficiency_layers:
+for layer in ts.layers(efficiency_model).values():
     print("Layer {} number of states: {}".format(layer.name, layer.state_count))
 ```
 
-Note how `efficiency_model` has the efficiency layers stored in the
-`efficiency_layers` attribute of the model. The output of the above code
-should look something like this:
+`ts.layers(efficiency_model)` returns the attached probes keyed by layer
+name. The output of the above code should look something like this:
 
 ```text
 Layer conv_1_post_states number of states: 5760000
@@ -293,7 +284,7 @@ calculates the entropy of the state space and divides by the number of
 neurons in the layer, giving an efficiency value in the range 0.00–1.00.
 
 ```python
-for layer in efficiency_model.efficiency_layers:
+for layer in ts.layers(efficiency_model).values():
     layer_efficiency = layer.efficiency()
     print("Layer {} efficiency: {:.1f}%".format(layer.name, 100 * layer_efficiency))
 ```
@@ -323,16 +314,14 @@ print("aIQ: {:.1f}%".format(100 * aIQ))
 ## Complete example
 
 ```python
-import requests
-import pickle
-import gzip
 import time
 
 from pathlib import Path
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import TensorDataset, DataLoader
+from torch.utils.data import DataLoader
+from torchvision import datasets, transforms
 import numpy as np
 
 import TensorState as ts
@@ -345,23 +334,11 @@ DATA_PATH = Path("data")
 PATH = DATA_PATH / "mnist"
 PATH.mkdir(parents=True, exist_ok=True)
 
-URL = "http://deeplearning.net/data/mnist/"
-FILENAME = "mnist.pkl.gz"
-if not (PATH / FILENAME).exists():
-    content = requests.get(URL + FILENAME).content
-    (PATH / FILENAME).open("wb").write(content)
+train_ds = datasets.MNIST(PATH, train=True, download=True, transform=transforms.ToTensor())
+valid_ds = datasets.MNIST(PATH, train=False, download=True, transform=transforms.ToTensor())
 
-with gzip.open((PATH / FILENAME).as_posix(), "rb") as f:
-    ((x_train, y_train), (x_valid, y_valid), _) = pickle.load(f, encoding="latin-1")
-
-    x_train, y_train, x_valid, y_valid = map(
-        torch.tensor, (x_train, y_train, x_valid, y_valid)
-    )
-
-    train_ds = TensorDataset(x_train, y_train)
-    train_dl = DataLoader(train_ds, batch_size=200, shuffle=True)
-    valid_ds = TensorDataset(x_valid, y_valid)
-    valid_dl = DataLoader(valid_ds, batch_size=200)
+train_dl = DataLoader(train_ds, batch_size=200, shuffle=True)
+valid_dl = DataLoader(valid_ds, batch_size=200)
 
 """ Create a LeNet-5 model """
 torch.manual_seed(0)
@@ -475,9 +452,7 @@ for epoch in range(num_epochs):
         break
 
 """ Evaluate model efficiency """
-efficiency_model = ts.build_efficiency_model(
-    model, attach_to=["Conv2d"], method="after"
-)
+efficiency_model = ts.attach(model, ts.match(types=nn.Conv2d), when="after")
 
 print()
 print("Running model predictions to capture states...")
@@ -491,12 +466,12 @@ print("Finished in {:.3f}s!".format(time.time() - start))
 
 print()
 print("Getting the number of states in each layer...")
-for layer in efficiency_model.efficiency_layers:
+for layer in ts.layers(efficiency_model).values():
     print("Layer {} number of states: {}".format(layer.name, layer.state_count))
 
 print()
 print("Evaluating efficiency of each layer...")
-for layer in efficiency_model.efficiency_layers:
+for layer in ts.layers(efficiency_model).values():
     start = time.time()
     print(
         "Layer {} efficiency: {:.1f}% ({:.3f}s)".format(

@@ -26,22 +26,28 @@ toolchain is required for the source install).
 
 ```python
 import torch, torchvision
+from torchvision.ops.misc import Conv2dNormActivation
 import TensorState as ts
 
 model = torchvision.models.mobilenet_v2(num_classes=10)
-ts.build_efficiency_model(model, attach_to=["Conv2dNormActivation"])
+ts.attach(model, ts.match(types=Conv2dNormActivation))
 
 # Run the model. Microstates are captured per attached layer.
 for x, _ in data_loader:
     model(x)
 
 # Inspect per-layer firing entropy.
-for layer in model.efficiency_layers:
+for layer in ts.layers(model).values():
     print(layer.name, layer.entropy())
 ```
 
 The capture path uses Triton for bit-packing on CUDA and the Rust
 extension for bit-packing on CPU, so the hook overhead is small.
+
+The older `ts.build_efficiency_model(model, attach_to=[...])` call still
+works and dispatches to `ts.attach` internally. New code should prefer
+`ts.attach` since `build_efficiency_model` will be removed in a future
+release.
 
 ## Developing
 
