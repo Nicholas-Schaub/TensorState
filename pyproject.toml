@@ -1,6 +1,6 @@
 [project]
 name = "tensorstate"
-version = "0.5.0.dev1"
+version = "0.5.0"
 description = "Neural network state-space analysis and entropy/efficiency tooling."
 authors = [
     { name = "Nicholas Schaub", email = "nicholas.j.schaub@gmail.com" },
@@ -170,7 +170,7 @@ not-subscriptable = "warn"
 call-non-callable = "warn"
 
 [tool.bumpversion]
-current_version = "0.5.0.dev1"
+current_version = "0.5.0"
 parse = '''(?x)
     (?P<major>\d+)
     \.(?P<minor>\d+)
@@ -199,4 +199,4 @@ filename = "VERSION"
 [[tool.bumpversion.files]]
 filename = "src/TensorState/__init__.py"
 search = '__version__ = "{current_version}"'
-replace = '__version__ = "{current_version}"'
+replace = '__version__ = "{new_version}"'
