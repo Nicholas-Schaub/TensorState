@@ -8,6 +8,104 @@ version semantics.
 
 ## [Unreleased]
 
+## [0.5.0] — modernization release
+
+Stable release. The bulk of the modernization (Rust CPU extension,
+Triton GPU kernel, apoptosis primitives, mkdocs / ruff / ty / uv tooling)
+landed in [0.5.0.dev1]; the items below are what changed between dev1
+and the stable release.
+
+### Added
+
+- **DuckDB-backed state store** replacing the zarr `_raw_states` array.
+  In-memory by default with a configurable `memory_limit` (DuckDB
+  auto-spills past the cap); optional on-disk database via the existing
+  `disk_path` argument. An Arrow-batched staging buffer subsumes the
+  bounded-window / multi-batch aggregation that used to be a separate
+  concern. `counts()` and `state_ids()` now derive from a single cached
+  `SELECT s, COUNT(*) FROM states GROUP BY s`, retiring the
+  `_lex_sort` + bin-edge analysis path. The Rust `_lex_sort` is kept in
+  the crate as a reference oracle for validating the DuckDB path.
+- **`probe.to_arrow()`** returning the captured microstates as a
+  `pyarrow.Table` for notebook / REPL inspection.
+- **`ts.attach` / `ts.match` predicate attach API** (PEP 8, composable).
+  `ts.match(types=, name=, predicate=)` returns a callable matcher that
+  composes via `|`, `&`, and `~`; `ts.attach(model, where, when="after", storage_path=, memory_device=, memory_limit=, raise_on_capture_error=)`
+  drives the same machinery as the legacy `build_efficiency_model`.
+- **Inspection API**: `ts.layers(model)`, `ts.layer(model, name)`,
+  `ts.entropy(model)`, `ts.efficiency(model)`. `entropy()` dispatches on
+  the first argument so the legacy `entropy(counts, alpha)` call still
+  works.
+- **`StateCaptureHook` is now an `nn.Module` probe** owned by a top-level
+  `_tensorstate_probes` `ModuleDict`. Probes travel with `.to()` /
+  `.cuda()` via non-persistent buffers; observational state stays out
+  of `state_dict()`.
+- **AttentionNode** for `nn.MultiheadAttention` head-level apoptosis
+  (destroy + identical-head merge only; distinct-head merge is non-linear
+  in the projection weights and intentionally not implemented).
+  `ModuleGraph` now hooks MHA as a single node and skips its `out_proj`
+  child so the whole module surfaces as one `ModuleData`.
+- **`raise_on_capture_error`** flag on `StateCaptureHook`. Capture-thread
+  failures are logged at the time they happen via a `Future` done
+  callback and re-raised on read with a chained traceback. Default stays
+  non-disruptive so one bad batch doesn't abort a long training run.
+- **Conv / depthwise / transposed forward-invariant tests** for the
+  existing channel-merge surgery (the surgery was already correct; it
+  was untested under real `(N,C,H,W)` input).
+- **Hook lifecycle tests** covering attach idempotency, detach,
+  `reset_states`, `capture_on` toggle, and that observational state is
+  not carried by `state_dict()`.
+- **`mkdocs build --strict` re-enabled** in CI; every public function
+  has parameter type annotations and `Raises:` blocks are griffe-clean.
+
+### Changed
+
+- **Module files renamed to PEP 8 snake_case**: `States.py`→`states.py`,
+  `Layers.py`→`layers.py`, `Dependency.py`→`dependency.py`,
+  `TensorState.py`→`core.py`. The package directory `TensorState/`
+  stays CamelCase since it is the public import name. `git mv`
+  preserves history; intra-package imports, logger names, and docs
+  references all updated.
+- **`requires-python` tightened to `>=3.13,<3.14`.** Python 3.14 is
+  blocked upstream until `networkx` ships 3.14 support (its
+  `configs.py` slotted-dataclass fails to import on 3.14, which breaks
+  `torch.compile`'s functorch import chain).
+- **`build_efficiency_model` is a thin shim over `ts.attach`**, kept
+  for back-compat. `model.efficiency_layers` is a deprecated alias
+  (`_DeprecatedProbeList`) that warns on iteration and resolves to the
+  live probes. Both will be removed in a future release; new code should
+  use `ts.attach` and `ts.layers(model)`.
+- **`StateCaptureHook._capture` is decorated `torch._dynamo.disable`** so
+  that a `torch.compile`'d model cleanly graph-breaks around the hook
+  and the eager hook still captures. Without this, dynamo traced into
+  the host-side store path and silently captured zero states.
+- **GPU buffer is independent of the (former zarr) chunk size**, sized
+  from `gpu_buffer_size` (MB) with a sensible floor.
+- **Default `memory_device`** resolves to `"gpu"` when CUDA is
+  available, `"cpu"` otherwise.
+
+### Removed
+
+- **`zarr` and `numcodecs`** runtime dependencies (and their sub-deps
+  `asciitree`, `deprecated`, `fasteners`, `wrapt`).
+
+### Fixed
+
+- **Capture under `torch.compile` silently dropped to zero states.** The
+  fix above (`torch._dynamo.disable`) restores capture. Verified with a
+  regression test that asserts a non-zero captured count on a compiled
+  LeNet5.
+- **`compress_states(bool_)` dtype mismatch** — the extension's pi8
+  path expects `uint8`. Bool is one byte so a zero-copy `.view(np.uint8)`
+  on the bool array fixes it.
+- **`ModuleGraph._grad_trace` was a `ClassVar` dict** accumulating
+  `grad_fn -> module` entries across every graph in the session. Reset
+  per-instance now, fixing the cross-test pollution that made the
+  AlexNet apoptosis test intermittently fail in full-suite runs.
+- **`disk_path` test fixture leaked** the `states_master` directory
+  between parametrized cases. Switched to `tmp_path_factory.mktemp` so
+  each case gets a unique, auto-cleaned dir.
+
 ## [0.5.0.dev1] — modernization release (work in progress)
 
 The first development release after a complete modernization pass. The
@@ -100,5 +198,6 @@ extension implementation, and runtime dependencies are new.
   compressed array directly, causing a misleading PyO3 type error. The
   Rust signature now matches Cython.
 
+[0.5.0]: https://github.com/Nicholas-Schaub/TensorState/releases/tag/v0.5.0
 [0.5.0.dev1]: https://github.com/Nicholas-Schaub/TensorState/releases/tag/v0.5.0.dev1
 [unreleased]: https://github.com/Nicholas-Schaub/TensorState/compare/v0.5.0...HEAD
