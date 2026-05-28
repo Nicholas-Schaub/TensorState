@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from TensorState.Layers import Probe, StateCaptureHook
+from TensorState.layers import Probe, StateCaptureHook
 
 logging.basicConfig(
     format="%(asctime)s - %(name)-10s - %(levelname)-8s - %(message)s",
@@ -378,9 +378,7 @@ def match(
             return False
         if name_set is not None and n not in name_set:
             return False
-        if predicate is not None and not predicate(n, m):
-            return False
-        return True
+        return predicate is None or predicate(n, m)
 
     return _Matcher(fn)
 
@@ -469,7 +467,7 @@ def attach(
     memory_limit: str | None = None,
     raise_on_capture_error: bool = False,
 ) -> torch.nn.Module:
-    """Attach state-capture probes to layers selected by a predicate.
+    r"""Attach state-capture probes to layers selected by a predicate.
 
     ``where(name, module)`` is called for each named submodule of ``model``;
     matching modules get a probe attached. Build matchers with :func:`match`,

@@ -12,7 +12,7 @@ import pyarrow as pa
 import torch
 
 import TensorState
-import TensorState.States as ts  # noqa: N813 -- deliberate package alias
+import TensorState.states as ts
 
 # Stage this many rows in memory before flushing a batch to DuckDB. DuckDB is
 # slow at many tiny appends, so capture buffers and inserts in Arrow batches.
@@ -132,7 +132,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)-10s - %(levelname)-8s - %(message)s",
     datefmt="%d-%b-%y %H:%M:%S",
 )
-logger = logging.getLogger("TensorState.Layers")
+logger = logging.getLogger("TensorState.layers")
 
 
 class AbstractStateCapture(abc.ABC):

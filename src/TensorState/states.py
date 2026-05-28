@@ -42,7 +42,7 @@ logging.basicConfig(
     format="%(asctime)s - %(name)-10s - %(levelname)-8s - %(message)s",
     datefmt="%d-%b-%y %H:%M:%S",
 )
-logger = logging.getLogger("TensorState.States")
+logger = logging.getLogger("TensorState.states")
 
 
 def _check_extension_functional() -> bool:

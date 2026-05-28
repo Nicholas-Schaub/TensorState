@@ -4,7 +4,7 @@ import torch
 
 import TensorState as ts  # noqa: N813 -- deliberate package alias
 from TensorState import testing as ts_testing
-from TensorState.Layers import StateCaptureHook
+from TensorState.layers import StateCaptureHook
 
 
 def test_build_efficiency_model_threads_memory_limit_and_to_arrow():

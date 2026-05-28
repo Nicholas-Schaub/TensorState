@@ -12,9 +12,9 @@ import io
 import torch
 
 import TensorState as ts  # noqa: N813 -- deliberate package alias
+from TensorState import remove_state_layers
 from TensorState import testing as ts_testing
-from TensorState.Layers import StateCaptureHook
-from TensorState.TensorState import remove_state_layers
+from TensorState.layers import StateCaptureHook
 
 # A single batch shape is reused so the BatchNorm layers inside LeNet's
 # Conv2dNormActivation blocks see batch > 1 in train() mode.

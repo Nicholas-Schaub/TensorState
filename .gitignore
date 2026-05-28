@@ -180,3 +180,4 @@ decisions/
 # MCP server configuration — contains credentials (PLANE_API_KEY,
 # PLANE_PASSWORD). Never commit.
 .mcp.json
+.claude/

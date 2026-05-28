@@ -13,8 +13,8 @@ from concurrent.futures import wait as futures_wait
 import pytest
 import torch
 
-import TensorState.States as ts_states  # noqa: N813 -- deliberate package alias
-from TensorState.Layers import StateCaptureHook
+import TensorState.states as ts_states
+from TensorState.layers import StateCaptureHook
 
 
 def _boom(*_args, **_kwargs):
@@ -37,7 +37,7 @@ def test_capture_failure_logged_and_reraised_on_read(monkeypatch, caplog):
     hook = StateCaptureHook(name="probe_read", memory_device="cpu")
     monkeypatch.setattr(ts_states, "compress_states", _boom)
 
-    with caplog.at_level(logging.ERROR, logger="TensorState.Layers"):
+    with caplog.at_level(logging.ERROR, logger="TensorState.layers"):
         hook._capture(None, torch.randn(8, 16))
         # The failure is logged by the capture thread's done-callback. Add our
         # own callback after the hook's so callbacks fire in registration order

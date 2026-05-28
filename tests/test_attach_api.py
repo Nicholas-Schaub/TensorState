@@ -9,7 +9,7 @@ from torchvision.ops.misc import Conv2dNormActivation
 
 import TensorState as ts  # noqa: N813 -- deliberate package alias
 from TensorState import testing as ts_testing
-from TensorState.Layers import StateCaptureHook
+from TensorState.layers import StateCaptureHook
 
 
 def _input():
@@ -58,7 +58,8 @@ def test_match_predicate_can_inspect_module():
     m = _model()
     matcher = ts.match(predicate=lambda _n, mod: isinstance(mod, nn.Linear))
     targets = [mod for n, mod in m.named_modules() if matcher(n, mod)]
-    assert targets and all(isinstance(t, nn.Linear) for t in targets)
+    assert targets
+    assert all(isinstance(t, nn.Linear) for t in targets)
 
 
 def test_match_combines_kwargs_with_and():
@@ -111,7 +112,7 @@ def test_match_invert_negates():
 
 
 def test_attach_matches_build_efficiency_model_for_class_name():
-    """ts.attach(types=X) and build_efficiency_model(attach_to=[X]) match the same set."""
+    """ts.attach and build_efficiency_model select the same set by class name."""
     a = _model()
     ts.attach(a, where=ts.match(types=Conv2dNormActivation))
 

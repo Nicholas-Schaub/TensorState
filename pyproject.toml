@@ -124,8 +124,10 @@ ignore = [
     "ANN202",  # missing-return-type-private-function
     "ANN204",  # missing-return-type-special-method
     "ANN206",  # missing-return-type-class-method
-    # Deferred until the module-layout reorganization (CamelCase rename)
-    "N999",    # invalid-module-name (TensorState/States.py etc. are CamelCase)
+    # The package directory is `TensorState/` by deliberate choice (it's the
+    # public import name and renaming would break every downstream user);
+    # the modules inside are snake_case as of AIQ-18.
+    "N999",    # invalid-module-name (package name is CamelCase, intentional)
 ]
 
 [tool.ruff.lint.per-file-ignores]
@@ -142,7 +144,7 @@ ignore = [
 # setup.py is a small Cython build hook.
 "setup.py" = ["ICN001", "D"]
 # Triton kernels use ALL_CAPS for compile-time constants by convention.
-"src/TensorState/States.py" = ["N803", "N806"]
+"src/TensorState/states.py" = ["N803", "N806"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

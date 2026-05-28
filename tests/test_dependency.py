@@ -1,6 +1,6 @@
 import torch
 
-from TensorState import Dependency
+from TensorState import dependency as Dependency  # noqa: N812 -- preserves local alias
 
 
 def test_linked_neurons():

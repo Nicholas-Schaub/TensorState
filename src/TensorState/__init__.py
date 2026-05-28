@@ -6,11 +6,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("TensorState")
 
-from .Dependency import ElementNode, ModuleGraph, OpNode  # noqa
-from .Layers import Probe, StateCaptureHook  # noqa
-from .models import LeNet_5, mobilenet_v2  # noqa
-from .States import compress_states, decompress_states, sort_states  # noqa
-from .TensorState import (  # noqa
+from .core import (  # noqa
     aIQ,
     attach,
     build_efficiency_model,
@@ -20,8 +16,13 @@ from .TensorState import (  # noqa
     layers,
     match,
     network_efficiency,
+    remove_state_layers,
     reset_efficiency_model,
     zero_info,
 )
+from .dependency import ElementNode, ModuleGraph, OpNode  # noqa
+from .layers import Probe, StateCaptureHook  # noqa
+from .models import LeNet_5, mobilenet_v2  # noqa
+from .states import compress_states, decompress_states, sort_states  # noqa
 
 __version__ = "0.5.0.dev1"

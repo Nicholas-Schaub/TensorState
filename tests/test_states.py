@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import torch
 
-from TensorState import States
+from TensorState import states as States  # noqa: N812 -- preserves local alias
 
 
 def _make_input(compression, num_neurons, dtype="float32"):

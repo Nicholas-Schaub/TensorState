@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from TensorState import testing as ts_testing
-from TensorState.Dependency import (
+from TensorState.dependency import (
     ApoptosisType,
     AttentionNode,
     BatchNormNode,
