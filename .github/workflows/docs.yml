@@ -27,10 +27,7 @@ jobs:
         run: uv sync --group dev
 
       - name: Build docs
-        # Note: --strict is intentionally omitted while the source has
-        # docstrings with missing type annotations (35 griffe warnings).
-        # Fix the docstrings in a follow-up, then re-enable --strict.
-        run: uv run mkdocs build
+        run: uv run mkdocs build --strict
 
       - name: Deploy to GitHub Pages
         # Deploy from `dev` (the active development branch) until v0.5.0

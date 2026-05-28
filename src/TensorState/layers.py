@@ -218,15 +218,15 @@ class AbstractStateCapture(abc.ABC):
 
     def __init__(
         self,
-        name,
-        disk_path=None,
+        name: str,
+        disk_path: str | Path | None = None,
         memory_device: str | int | None = None,
         gpu_buffer_size: float = 256.0,
         *,
         memory_limit: str | None = None,
         raise_on_capture_error: bool = False,
-        **kwargs,
-    ):
+        **kwargs: object,
+    ) -> None:
         """Abstract State Capture Layer.
 
         Args:
@@ -497,7 +497,7 @@ class AbstractStateCapture(abc.ABC):
                 )
             self._state_cache_index = 0
 
-    def state_ids(self):
+    def state_ids(self) -> list[bytes]:
         r"""Identity of observed states.
 
         This method returns a list of byte arrays. Each byte array corresponds
@@ -549,7 +549,7 @@ class AbstractStateCapture(abc.ABC):
         _, counts = np.unique(subset, axis=0, return_counts=True)
         return counts
 
-    def max_entropy(self):
+    def max_entropy(self) -> float:
         """Theoretical maximum entropy for the layer.
 
         The maximum entropy for the layer is equal to the number of neurons in
@@ -562,7 +562,7 @@ class AbstractStateCapture(abc.ABC):
         """
         return float(self._input_shape[self._channel_index])
 
-    def entropy(self, alpha=1):
+    def entropy(self, alpha: float | None = 1) -> float:
         """Calculate the entropy of the layer.
 
         Calculate the entropy from the observed states. The alpha value is the
@@ -578,9 +578,10 @@ class AbstractStateCapture(abc.ABC):
         """
         if alpha is None:
             return self.max_entropy()
-        return TensorState.entropy(self.counts(), alpha)
+        # entropy() dispatches; counts-array form always returns float.
+        return float(TensorState.entropy(self.counts(), alpha))
 
-    def efficiency(self, alpha1=1, alpha2=None):
+    def efficiency(self, alpha1: float = 1, alpha2: float | None = None) -> float:
         """Calculate the efficiency of the layer.
 
         This method returns the efficiency of the layer. Originally, the

@@ -1,3 +1,3 @@
 # TensorState
 
-::: TensorState.TensorState
+::: TensorState.core

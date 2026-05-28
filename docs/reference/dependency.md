@@ -1,3 +1,3 @@
 # Dependency
 
-::: TensorState.Dependency
+::: TensorState.dependency

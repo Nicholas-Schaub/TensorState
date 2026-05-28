@@ -232,7 +232,7 @@ def _compress_states_torch(states: torch.Tensor) -> torch.Tensor:
     return _compress_states_torch_cpu(states)
 
 
-def compress_states(states):
+def compress_states(states: np.ndarray | torch.Tensor) -> np.ndarray | torch.Tensor:
     """Compress a state space tensor.
 
     This function quantizes neurons into firing (>0) or non-firing (<=0), then
@@ -264,7 +264,9 @@ def compress_states(states):
             logger.debug("compress_states: _compress_tensor_pi8")
             # The extension's pi8 path wants uint8; bool is 1 byte so this
             # view is zero-copy and non-zero bytes are treated as firing.
-            return _ts._compress_tensor_pi8(states.view(np.uint8))
+            # np.asarray is a no-op on an existing ndarray; it pins the type
+            # for ty (the Union annotation otherwise muddles .view overloads).
+            return _ts._compress_tensor_pi8(np.asarray(states).view(np.uint8))
         raise TypeError("states must be numpy.float32 or numpy.bool_")
     if isinstance(states, torch.Tensor):
         logger.debug("compress_states: _compress_states_torch")
@@ -274,7 +276,9 @@ def compress_states(states):
     )
 
 
-def sort_states(states, state_count):
+def sort_states(
+    states: np.ndarray | torch.Tensor, state_count: int
+) -> tuple[np.ndarray, np.ndarray]:
     """Sort the states to place identical states next to each other.
 
     This function sorts the states stored in a 2d numpy.ndarray so that
@@ -304,7 +308,7 @@ def sort_states(states, state_count):
     return bin_edges, index
 
 
-def decompress_states(states, num_neurons):
+def decompress_states(states: np.ndarray, num_neurons: int) -> np.ndarray:
     """Decompress states to numpy array of booleans.
 
     This functions takes a 2d numpy array of compressed neuron states and

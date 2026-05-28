@@ -1,3 +1,3 @@
 # Layers
 
-::: TensorState.Layers
+::: TensorState.layers

@@ -18,7 +18,7 @@ logger = logging.getLogger("TensorState")
 logger.setLevel(logging.WARNING)
 
 
-def zero_info(states):
+def zero_info(states: np.ndarray) -> list[list[int]]:
     """Get index of zero information neurons.
 
     This function evaluates state space to find zero information neurons, or
@@ -66,7 +66,9 @@ def zero_info(states):
     return corr_neurons
 
 
-def network_efficiency(efficiencies):
+def network_efficiency(
+    efficiencies: list[float] | torch.nn.Module,
+) -> float | None:
     """Calculate the network efficiency.
 
     This method calculates the neural network efficiency, defined as the
@@ -98,7 +100,9 @@ def network_efficiency(efficiencies):
     return np.exp(sum(np.log(eff) for eff in efficiencies) / len(efficiencies))
 
 
-def aIQ(net_efficiency, accuracy, weight):  # noqa: N802 -- public API: aIQ metric
+def aIQ(  # noqa: N802 -- public API: aIQ metric
+    net_efficiency: float, accuracy: float, weight: int
+) -> float:
     """Calculate the artificial intelligence quotient.
 
     The artificial intelligence quotient (aIQ) is a simple metric to report a
@@ -117,7 +121,7 @@ def aIQ(net_efficiency, accuracy, weight):  # noqa: N802 -- public API: aIQ metr
         weight: An integer with value >=1
 
     Raises:
-        Raised if weight <= 0
+        ValueError: If ``weight`` is not a positive integer.
 
     Returns:
         The artificial intelligence quotient
@@ -127,7 +131,11 @@ def aIQ(net_efficiency, accuracy, weight):  # noqa: N802 -- public API: aIQ metr
     return np.power(accuracy**weight * net_efficiency, 1 / (weight + 1))
 
 
-def entropy(model_or_counts, alpha=1, name=None):
+def entropy(
+    model_or_counts: torch.nn.Module | np.ndarray,
+    alpha: float = 1,
+    name: str | None = None,
+) -> dict[str, float] | float:
     """Calculate the Renyi entropy.
 
     The Renyi entropy is a general definition of entropy that encompasses
@@ -195,7 +203,7 @@ def _iter_probes(model) -> Iterator[tuple[str, Probe]]:
             yield clean, module
 
 
-def layers(model) -> dict[str, Probe]:
+def layers(model: torch.nn.Module) -> dict[str, Probe]:
     """Probes attached to a model, keyed by clean probe name.
 
     Args:
@@ -209,7 +217,7 @@ def layers(model) -> dict[str, Probe]:
     return dict(_iter_probes(model))
 
 
-def layer(model, name: str) -> Probe:
+def layer(model: torch.nn.Module, name: str) -> Probe:
     """Return the single attached probe named ``name``.
 
     Args:
@@ -231,7 +239,13 @@ def layer(model, name: str) -> Probe:
         ) from None
 
 
-def efficiency(model, alpha1=1, alpha2=None, reduce=None, name=None):
+def efficiency(
+    model: torch.nn.Module,
+    alpha1: float = 1,
+    alpha2: float | None = None,
+    reduce: str | None = None,
+    name: str | None = None,
+) -> dict[str, float] | float | None:
     """Per-layer (or reduced) efficiency for a model with attached probes.
 
     Args:
@@ -293,7 +307,7 @@ class _DeprecatedProbeList(list):
         return self._resolve()[index]
 
 
-def reset_efficiency_model(model):
+def reset_efficiency_model(model: torch.nn.Module) -> None:
     """Reset all efficiency layers/hooks in a model.
 
     This method resets all efficiency layers or hooks in a model, setting the
@@ -546,16 +560,16 @@ def _pt_efficiency_model(
 
 
 def build_efficiency_model(
-    model,
-    attach_to,
-    exclude=None,
-    method="after",
-    storage_path=None,
+    model: torch.nn.Module,
+    attach_to: list[str] | str,
+    exclude: list[str] | str | None = None,
+    method: str = "after",
+    storage_path: str | Path | None = None,
     memory_device: str | int = "cpu",
     *,
     memory_limit: str | None = None,
     raise_on_capture_error: bool = False,
-):
+) -> torch.nn.Module:
     """Attach state capture methods to a neural network.
 
     This method takes an existing PyTorch model and attaches forward hooks
@@ -636,7 +650,7 @@ def build_efficiency_model(
     return new_model
 
 
-def remove_state_layers(model) -> None:
+def remove_state_layers(model: torch.nn.Module) -> torch.nn.Module:
     """Remove state capture layers.
 
     Note:
@@ -649,7 +663,9 @@ def remove_state_layers(model) -> None:
         A model with state capture layers removed.
     """
     if hasattr(model, "state_capture_hooks"):
-        for hook in model.state_capture_hooks:
+        # Runtime-added attribute; ty sees nn.Module.__getattr__'s union type.
+        hooks: list = model.state_capture_hooks
+        for hook in hooks:
             hook.remove()
         del model.state_capture_hooks
         del model.efficiency_layers

@@ -1,3 +1,3 @@
 # States
 
-::: TensorState.States
+::: TensorState.states
