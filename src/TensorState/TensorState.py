@@ -1,7 +1,9 @@
 import logging
+import re
 import warnings
 from collections import OrderedDict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterable, Iterator
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -305,6 +307,213 @@ def reset_efficiency_model(model):
         probe.reset_states()
 
 
+class _Matcher:
+    """Composable ``(name, module) -> bool`` predicate.
+
+    Build via :func:`match`; compose with ``|`` (union), ``&`` (intersection),
+    and ``~`` (negation). Bare callables work anywhere a ``_Matcher`` does;
+    wrapping them is only needed if you want the operator composition.
+    """
+
+    def __init__(self, fn: Callable[[str, torch.nn.Module], bool]):
+        self._fn = fn
+
+    def __call__(self, name: str, module: torch.nn.Module) -> bool:
+        return self._fn(name, module)
+
+    def __or__(self, other: Callable[[str, torch.nn.Module], bool]) -> "_Matcher":
+        return _Matcher(lambda n, m: self(n, m) or other(n, m))
+
+    def __and__(self, other: Callable[[str, torch.nn.Module], bool]) -> "_Matcher":
+        return _Matcher(lambda n, m: self(n, m) and other(n, m))
+
+    def __invert__(self) -> "_Matcher":
+        return _Matcher(lambda n, m: not self(n, m))
+
+
+def match(
+    *,
+    types: type | tuple[type, ...] | None = None,
+    name: str | re.Pattern | Iterable[str] | None = None,
+    predicate: Callable[[str, torch.nn.Module], bool] | None = None,
+) -> _Matcher:
+    """Compose a ``(name, module) -> bool`` predicate from optional checks.
+
+    All supplied conditions must hold (logical AND). Compose multiple matchers
+    via ``|`` / ``&`` / ``~``.
+
+    Args:
+        types: An ``nn.Module`` subclass or tuple of subclasses. The module
+            must pass ``isinstance``.
+        name: A regex (``str`` or compiled ``re.Pattern``) or an iterable of
+            exact qualified names. ``str`` is treated as regex
+            (``re.search``); pass a compiled pattern to be explicit.
+        predicate: An arbitrary ``(name, module) -> bool`` callable for any
+            checks the structured kwargs can't express.
+
+    Returns:
+        A :class:`_Matcher`.
+    """
+    type_tuple: tuple[type, ...] | None
+    if types is None:
+        type_tuple = None
+    elif isinstance(types, type):
+        type_tuple = (types,)
+    else:
+        type_tuple = tuple(types)
+
+    name_pat: re.Pattern | None = None
+    name_set: set[str] | None = None
+    if isinstance(name, str):
+        name_pat = re.compile(name)
+    elif isinstance(name, re.Pattern):
+        name_pat = name
+    elif name is not None:
+        name_set = set(name)
+
+    def fn(n: str, m: torch.nn.Module) -> bool:
+        if type_tuple is not None and not isinstance(m, type_tuple):
+            return False
+        if name_pat is not None and name_pat.search(n) is None:
+            return False
+        if name_set is not None and n not in name_set:
+            return False
+        if predicate is not None and not predicate(n, m):
+            return False
+        return True
+
+    return _Matcher(fn)
+
+
+def _iter_targets(
+    model: torch.nn.Module,
+    where: Callable[[str, torch.nn.Module], bool],
+) -> list[tuple[str, torch.nn.Module]]:
+    """Walk ``model.named_modules()`` and return matched ``(name, module)`` pairs."""
+    seen: set[int] = set()
+    targets: list[tuple[str, torch.nn.Module]] = []
+    for n, m in model.named_modules():
+        if id(m) in seen:
+            continue
+        seen.add(id(m))
+        if where(n, m):
+            targets.append((n, m))
+    return targets
+
+
+def _attach_probes(
+    model: torch.nn.Module,
+    targets: list[tuple[str, torch.nn.Module]],
+    *,
+    when: str,
+    storage_path: str | Path | None,
+    memory_device: str | int,
+    memory_limit: str | None,
+    raise_on_capture_error: bool,
+) -> torch.nn.Module:
+    """Attach state-capture probes to a fixed list of target modules.
+
+    Resets ``model.state_capture_hooks`` and ``model._tensorstate_probes``.
+    Probes live in the top-level ``_tensorstate_probes`` ``ModuleDict`` so
+    container modules (``nn.Sequential`` and friends) — whose ``forward``
+    iterates their children — aren't disturbed by adding a child probe.
+    """
+    if when not in ("before", "after", "both"):
+        raise ValueError(f"when must be 'before' | 'after' | 'both', got {when!r}")
+
+    model.state_capture_hooks = []
+    model._tensorstate_probes = torch.nn.ModuleDict()
+
+    for mod_name, module in targets:
+        # ModuleDict keys cannot contain "."; sanitize the qualified name.
+        base_key = (mod_name or "root").replace(".", "__")
+
+        if when in ("before", "both"):
+            probe = StateCaptureHook(
+                name=str(mod_name) + "_pre_states",
+                disk_path=storage_path,
+                memory_device=memory_device,
+                raise_on_capture_error=raise_on_capture_error,
+                memory_limit=memory_limit,
+            )
+            model._tensorstate_probes[f"{base_key}_pre"] = probe
+            model.state_capture_hooks.append(
+                module.register_forward_pre_hook(probe._capture)
+            )
+
+        if when in ("after", "both"):
+            probe = StateCaptureHook(
+                name=str(mod_name) + "_post_states",
+                disk_path=storage_path,
+                memory_device=memory_device,
+                raise_on_capture_error=raise_on_capture_error,
+                memory_limit=memory_limit,
+            )
+            model._tensorstate_probes[f"{base_key}_post"] = probe
+            model.state_capture_hooks.append(
+                module.register_forward_hook(probe._capture)
+            )
+
+    # Deprecated back-compat handle; new code should use TensorState.layers().
+    model.efficiency_layers = _DeprecatedProbeList(model)
+    return model
+
+
+def attach(
+    model: torch.nn.Module,
+    where: Callable[[str, torch.nn.Module], bool],
+    *,
+    when: str = "after",
+    storage_path: str | Path | None = None,
+    memory_device: str | int = "cpu",
+    memory_limit: str | None = None,
+    raise_on_capture_error: bool = False,
+) -> torch.nn.Module:
+    """Attach state-capture probes to layers selected by a predicate.
+
+    ``where(name, module)`` is called for each named submodule of ``model``;
+    matching modules get a probe attached. Build matchers with :func:`match`,
+    which compose via ``|``, ``&``, and ``~``::
+
+        ts.attach(
+            model,
+            where=ts.match(types=(nn.Conv2d, nn.Linear))
+                  & ts.match(name=r"^backbone\\."),
+            when="after",
+            memory_limit="4GB",
+        )
+
+    This is the new public attach API; :func:`build_efficiency_model` is a
+    legacy shim that translates its string-list ``attach_to`` argument to a
+    predicate and delegates here.
+
+    Args:
+        model: A PyTorch ``nn.Module``.
+        where: A ``(name, module) -> bool`` callable (use :func:`match`).
+        when: ``"before"``, ``"after"``, or ``"both"``.
+        storage_path: Directory under which to back the DuckDB store with an
+            on-disk database. In-memory if ``None``.
+        memory_device: ``"cpu"`` or ``"gpu"`` — controls the GPU-resident
+            compressed-state cache.
+        memory_limit: DuckDB ``memory_limit`` PRAGMA value (e.g. ``"4GB"``).
+        raise_on_capture_error: When ``True``, a capture failure aborts the
+            next capture call by re-raising the stored error.
+
+    Returns:
+        ``model`` (modified in place) with probes attached.
+    """
+    targets = _iter_targets(model, where)
+    return _attach_probes(
+        model,
+        targets,
+        when=when,
+        storage_path=storage_path,
+        memory_device=memory_device,
+        memory_limit=memory_limit,
+        raise_on_capture_error=raise_on_capture_error,
+    )
+
+
 def _pt_efficiency_model(
     model,
     attach_to,
@@ -315,65 +524,27 @@ def _pt_efficiency_model(
     raise_on_capture_error,
     memory_limit,
 ):
-    model.state_capture_hooks = []
-    # Probes are owned here, off every module's forward path. Adding them
-    # as children of the watched module would break container modules
-    # (nn.Sequential and friends) whose forward iterates their children.
-    model._tensorstate_probes = torch.nn.ModuleDict()
+    # Translate the legacy attach_to / exclude string-list API to a predicate
+    # and reuse the shared _attach_probes machinery. Preserves the historical
+    # selection semantics: a module matches if its class name OR its qualified
+    # name is in attach_to (and its name is not in exclude).
+    attach_set = set(attach_to) if not isinstance(attach_to, str) else {attach_to}
+    exclude_set = set(exclude)
 
-    layer_ids = {
-        id(module): (module.__class__.__name__, None, module)
-        for module in model.modules()
-    }
-    layer_ids.update(
-        {
-            id(module): (module.__class__.__name__, name, module)
-            for name, module in model.named_modules()
-        }
+    def legacy_where(n: str, m: torch.nn.Module) -> bool:
+        if n in exclude_set:
+            return False
+        return m.__class__.__name__ in attach_set or n in attach_set
+
+    return _attach_probes(
+        model,
+        _iter_targets(model, legacy_where),
+        when=method,
+        storage_path=storage_path,
+        memory_device=memory_device,
+        memory_limit=memory_limit,
+        raise_on_capture_error=raise_on_capture_error,
     )
-
-    for cls_name, mod_name, module in layer_ids.values():
-        if (
-            cls_name not in attach_to or mod_name in exclude
-        ) and mod_name not in attach_to:
-            continue
-
-        # ModuleDict keys cannot contain "."; sanitize the qualified name.
-        base_key = (mod_name or "root").replace(".", "__")
-
-        # Add pre-hook if requested
-        if method in ["before", "both"]:
-            efficiency_layer = StateCaptureHook(
-                name=str(mod_name) + "_pre_states",
-                disk_path=storage_path,
-                memory_device=memory_device,
-                raise_on_capture_error=raise_on_capture_error,
-                memory_limit=memory_limit,
-            )
-            model._tensorstate_probes[f"{base_key}_pre"] = efficiency_layer
-
-            model.state_capture_hooks.append(
-                module.register_forward_pre_hook(efficiency_layer._capture)
-            )
-
-        if method in ["after", "both"]:
-            efficiency_layer = StateCaptureHook(
-                name=str(mod_name) + "_post_states",
-                disk_path=storage_path,
-                memory_device=memory_device,
-                raise_on_capture_error=raise_on_capture_error,
-                memory_limit=memory_limit,
-            )
-            model._tensorstate_probes[f"{base_key}_post"] = efficiency_layer
-
-            model.state_capture_hooks.append(
-                module.register_forward_hook(efficiency_layer._capture)
-            )
-
-    # Deprecated back-compat handle; new code should use TensorState.layers().
-    model.efficiency_layers = _DeprecatedProbeList(model)
-
-    return model
 
 
 def build_efficiency_model(
