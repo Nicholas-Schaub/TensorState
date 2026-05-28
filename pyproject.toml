@@ -16,8 +16,6 @@ classifiers = [
 ]
 dependencies = [
     "numpy>=1.26,<3.0",
-    "zarr>=2.18,<3.0",
-    "numcodecs>=0.13,<0.16",
     "grandalf>=0.8,<0.9",
     "pydantic>=2.0,<3.0",
     "torch>=2.10.0,<2.11.0",

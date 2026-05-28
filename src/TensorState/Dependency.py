@@ -1241,6 +1241,11 @@ class ModuleGraph(Graph):
             inp_tensor = torch.ones((1, 3, 256, 256))
         self.model = model
         self._visit_count = dict.fromkeys(model.modules(), 0)
+        # Per-instance grad_fn -> module map. Reset here (not left as the shared
+        # class-level dict) so graphs don't accumulate stale entries across
+        # instances/tests — that cross-graph pollution made AlexNet apoptosis
+        # tracing flaky under a full test run.
+        self._grad_trace = {}
 
         # nn.MultiheadAttention is not a leaf (it owns an ``out_proj`` Linear
         # child) and its QKV projection is functional (``in_proj_weight`` is a
