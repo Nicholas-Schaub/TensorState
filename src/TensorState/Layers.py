@@ -113,6 +113,16 @@ class _StateStore:
             return np.empty((0, self._ncols), dtype=np.uint8)
         return np.stack([np.frombuffer(r[0], dtype=np.uint8) for r in rows])
 
+    def to_arrow(self) -> pa.Table:
+        """Return all stored microstates as a pyarrow Table (one BLOB column).
+
+        Convenience for inspection / debugging from a notebook or REPL. The
+        rows are not deduplicated; for grouped counts use :meth:`grouped`.
+        """
+        with self._lock:
+            self._flush_locked()
+            return self._con.execute("SELECT s FROM states").fetch_arrow_table()
+
     def close(self) -> None:
         with contextlib.suppress(Exception):
             self._con.close()
@@ -213,6 +223,7 @@ class AbstractStateCapture(abc.ABC):
         memory_device: str | int | None = None,
         gpu_buffer_size: float = 256.0,
         *,
+        memory_limit: str | None = None,
         raise_on_capture_error: bool = False,
         **kwargs,
     ):
@@ -222,7 +233,8 @@ class AbstractStateCapture(abc.ABC):
             name: Name of the state capture layer.
             disk_path: Directory under which to back the state store with an
                 on-disk DuckDB database. If None (the default), the store is
-                held in memory.
+                held in memory; DuckDB will still spill to a temp dir when
+                ``memory_limit`` is exceeded.
             memory_device: ``"cpu"``, ``"gpu"``, or a CUDA device index. When
                 set to ``"gpu"`` (or an int) and a CUDA-capable PyTorch is
                 available, captured states are accumulated in a GPU-resident
@@ -233,6 +245,10 @@ class AbstractStateCapture(abc.ABC):
                 in megabytes. Larger buffers mean fewer device-to-host
                 transfers at the cost of more VRAM. Defaults to 256 MB.
                 Ignored when ``memory_device`` resolves to ``"cpu"``.
+            memory_limit: DuckDB ``memory_limit`` PRAGMA value, e.g. ``"4GB"``.
+                When the resident state table grows past this, DuckDB
+                automatically spills to a temp directory on disk. ``None``
+                (the default) leaves DuckDB's own default in place.
             raise_on_capture_error: When ``True``, a capture failure aborts the
                 next capture call by re-raising the stored error (fail-fast).
                 When ``False`` (the default), capture failures are logged when
@@ -246,6 +262,7 @@ class AbstractStateCapture(abc.ABC):
         self._capture_error = None
         self._capture_error_lock = threading.Lock()
         self.raise_on_capture_error = raise_on_capture_error
+        self._memory_limit = memory_limit
 
         # Assign a name to the layer. Some inheriting classes make name
         # protected, so catch the error just in case.
@@ -256,7 +273,6 @@ class AbstractStateCapture(abc.ABC):
         # store itself is created in reset_states once the neuron count (and
         # thus the packed-byte width) is known.
         self._store = None
-        self._memory_limit = None
         if disk_path is not None:
             base = disk_path if isinstance(disk_path, Path) else Path(disk_path)
             base = base / "tensor_states"
@@ -651,6 +667,15 @@ class StateCaptureHook(AbstractStateCapture, Probe):
         self.register_buffer("_state_cache", None, persistent=False)
 
         self._channel_index = 1
+
+    def to_arrow(self) -> pa.Table:
+        """Captured microstates as a pyarrow Table (one BLOB column ``s``).
+
+        Convenience for inspection: ``probe.to_arrow().to_pandas()`` gives a
+        DataFrame if pandas is installed. Drains pending captures first.
+        """
+        self._drain()
+        return self._store.to_arrow()
 
     def _thread(self, tensor: torch.Tensor):
         if tensor.device.type == "cuda" and self.memory_device != "cpu":

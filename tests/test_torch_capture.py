@@ -7,6 +7,26 @@ from TensorState import testing as ts_testing
 from TensorState.Layers import StateCaptureHook
 
 
+def test_build_efficiency_model_threads_memory_limit_and_to_arrow():
+    """memory_limit reaches the store; probes expose a to_arrow() handle (AIQ-39)."""
+    model = ts_testing.small_model("lenet5", num_classes=10)
+    ts.build_efficiency_model(
+        model, attach_to=["Conv2dNormActivation"], memory_limit="1GB"
+    )
+    model.eval()
+    with torch.no_grad():
+        model(torch.randn(4, 3, 64, 64))
+
+    for probe in ts.layers(model).values():
+        assert isinstance(probe, StateCaptureHook)
+        # memory_limit flowed all the way to the AbstractStateCapture instance.
+        assert probe._memory_limit == "1GB"
+        # Arrow handle materializes a Table with the expected row count.
+        tbl = probe.to_arrow()
+        assert tbl.num_rows == probe.state_count
+        assert tbl.schema.field(0).name == "s"
+
+
 def test_duckdb_store_counts_match_numpy():
     """DuckDB GROUP BY counting must match a numpy reference (AIQ-36/37)."""
     model = ts_testing.small_model("lenet5", num_classes=10)

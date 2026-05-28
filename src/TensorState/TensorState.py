@@ -313,6 +313,7 @@ def _pt_efficiency_model(
     storage_path,
     memory_device,
     raise_on_capture_error,
+    memory_limit,
 ):
     model.state_capture_hooks = []
     # Probes are owned here, off every module's forward path. Adding them
@@ -347,6 +348,7 @@ def _pt_efficiency_model(
                 disk_path=storage_path,
                 memory_device=memory_device,
                 raise_on_capture_error=raise_on_capture_error,
+                memory_limit=memory_limit,
             )
             model._tensorstate_probes[f"{base_key}_pre"] = efficiency_layer
 
@@ -360,6 +362,7 @@ def _pt_efficiency_model(
                 disk_path=storage_path,
                 memory_device=memory_device,
                 raise_on_capture_error=raise_on_capture_error,
+                memory_limit=memory_limit,
             )
             model._tensorstate_probes[f"{base_key}_post"] = efficiency_layer
 
@@ -381,6 +384,7 @@ def build_efficiency_model(
     storage_path=None,
     memory_device: str | int = "cpu",
     *,
+    memory_limit: str | None = None,
     raise_on_capture_error: bool = False,
 ):
     """Attach state capture methods to a neural network.
@@ -388,6 +392,12 @@ def build_efficiency_model(
     This method takes an existing PyTorch model and attaches forward hooks
     to capture the firing states of neural network layers. The model is
     modified in place (hooks attached) and returned for convenience.
+
+    Captured states are kept in a DuckDB-backed store, one bit-packed
+    microstate per row. The store is held in memory by default; pass
+    ``storage_path`` to back it with an on-disk DuckDB database, and/or
+    ``memory_limit`` to cap resident memory (DuckDB spills to a temp dir
+    when it would exceed the cap).
 
     Args:
         model: A PyTorch ``nn.Module`` or Lightning ``LightningModule``.
@@ -400,10 +410,15 @@ def build_efficiency_model(
             a StateCapture layer attached to it. Defaults to [].
         method: The location to attach the StateCapture layer to. Must be one of
             ['before','after','both']. Defaults to 'after'.
-        storage_path: Path on disk to store states in zarr format. If None,
-            states are stored in memory. Defaults to None.
+        storage_path: Directory under which to back the state store with an
+            on-disk DuckDB database. If None (the default), the store is held
+            in memory.
         memory_device: "cpu" or "gpu". When "gpu" and torch.cuda is available,
             the state cache is held on GPU before transferring to main memory.
+        memory_limit: DuckDB ``memory_limit`` PRAGMA value, e.g. ``"4GB"``.
+            When the resident state table grows past this, DuckDB spills to a
+            temp directory. ``None`` (the default) leaves DuckDB's own default
+            in place.
         raise_on_capture_error: When True, a capture failure aborts the next
             forward pass through a probe by re-raising the stored error. When
             False (the default), capture failures are logged when they occur
@@ -441,6 +456,7 @@ def build_efficiency_model(
             storage_path,
             memory_device,
             raise_on_capture_error,
+            memory_limit,
         )
     else:
         raise TypeError(
