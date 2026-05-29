@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+# OIDC trusted publishing to PyPI — no API token required.
+# Configure trusted publisher on PyPI once: project=tensorstate,
+# owner=Nicholas-Schaub, repo=TensorState, workflow=release.yml.
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    needs: wait_for_wheels
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/tensorstate
+    steps:
+      - name: Download wheel + sdist artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          skip-existing: true
+
+  # Sentinel job that waits for wheels.yml (same trigger) to finish before
+  # publishing. wheels.yml builds the artifacts that this workflow uploads.
+  wait_for_wheels:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for wheels workflow
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.sha }}
+          check-name: "wheels"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 10

@@ -1,0 +1,64 @@
+[files]
+extend-exclude = [
+    "*.lock",
+    "uv.lock",
+    "Cargo.lock",
+    ".venv/",
+    "target/",
+    "site/",
+    "*.cpp",
+    "*.so",
+    "*.html",
+    "crates/tensorstate-core/src/arch/**",
+]
+
+[default]
+# typos by default rewrites "Nd" -> "And" which corrupts PyTorch private
+# class refs like `_ConvNd`, `_AdaptiveMaxPoolNd`, etc. Skip the suffix
+# entirely so it cannot fire inside identifiers.
+extend-ignore-identifiers-re = [
+    "_[A-Za-z]+Nd$",
+    "_[A-Za-z]+Nd[A-Z_]",
+]
+
+[default.extend-words]
+# Direct allowlist (defense in depth)
+Nd = "Nd"
+
+# Project-specific technical terms
+tensorstate = "tensorstate"
+TensorState = "TensorState"
+microstate = "microstate"
+microstates = "microstates"
+aIQ = "aIQ"
+apoptose = "apoptose"
+apoptosed = "apoptosed"
+apoptotic = "apoptotic"
+apoptosis = "apoptosis"
+
+# Math / ML jargon
+Bernoulli = "Bernoulli"
+logsumexp = "logsumexp"
+logsigmoid = "logsigmoid"
+softmax = "softmax"
+Shannon = "Shannon"
+Kolmogorov = "Kolmogorov"
+
+# Library names that look like typos
+zarr = "zarr"
+numcodecs = "numcodecs"
+grandalf = "grandalf"
+torchvision = "torchvision"
+cuda = "cuda"
+CuPy = "CuPy"
+cupy = "cupy"
+Cython = "Cython"
+cython = "cython"
+Triton = "Triton"
+
+# Common short-name authors / projects
+HRank = "HRank"
+TissueNet = "TissueNet"
+EVICAN = "EVICAN"
+ZO1 = "ZO1"
+Cellpose = "Cellpose"

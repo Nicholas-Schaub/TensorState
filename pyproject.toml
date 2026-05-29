@@ -1,47 +1,202 @@
-[tool.poetry]
-name = "TensorState"
-version = "0.4.0"
-description = ""
-authors = ["Nicholas-Schaub <nicholas.j.schaub@gmail.com>"]
+[project]
+name = "tensorstate"
+version = "0.5.0"
+description = "Neural network state-space analysis and entropy/efficiency tooling."
+authors = [
+    { name = "Nicholas Schaub", email = "nicholas.j.schaub@gmail.com" },
+]
 readme = "README.md"
-packages = [{include = "TensorState", from = "src"}]
+requires-python = ">=3.13,<3.14"
+license = "MIT"
+license-files = ["LICENSE"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy>=1.26,<3.0",
+    "grandalf>=0.8,<0.9",
+    "pydantic>=2.0,<3.0",
+    "torch>=2.10.0,<2.11.0",
+    "torchvision>=0.25.0,<0.26.0",
+    "duckdb>=1.5.3",
+    "pyarrow>=24.0.0",
+]
 
-[tool.poetry.build]
-script = "build.py"
-generate-setup-file = true
+[project.optional-dependencies]
+examples = [
+    "lightning>=2.2,<3.0",
+    "matplotlib>=3.8,<4.0",
+]
 
-[tool.poetry.dependencies]
-python = "^3.8.1"
-numpy = "^1.24.2"
-zarr = "^2.14.2"
-numcodecs = "^0.11.0"
+[project.urls]
+Homepage = "https://github.com/Nicholas-Schaub/TensorState"
+Documentation = "https://nicholas-schaub.github.io/TensorState/"
+Issues = "https://github.com/Nicholas-Schaub/TensorState/issues"
 
+[project.entry-points.pytest11]
+tensorstate = "TensorState.testing.pytest_plugin"
 
-[tool.poetry.group.dev.dependencies]
-cython = "3.0.0a11"
-black = "^23.1.0"
-mypy = "^1.1.1"
-flake8 = "^6.0.0"
-flake8-docstrings = "^1.7.0"
-isort = "^5.12.0"
-pre-commit = "^3.1.1"
-bump2version = "^1.0.1"
-poetry = "^1.4.0"
-pytest = "^7.2.2"
-pytest-benchmark = "^4.0.0"
-pytest-sugar = "^0.9.6"
-pytest-xdist = "^3.2.0"
-pytest-cov = "^4.0.0"
-nox = "^2022.11.21"
-
-
-[tool.poetry.group.examples.dependencies]
-lightning = "^1.9.4"
-torch = "1.13.1"
-torchvision = "0.14.1"
-cupy-cuda11x = "^11.6.0"
-matplotlib = "^3.7.1"
+[dependency-groups]
+dev = [
+    "cython>=3.0",
+    "maturin>=1.7,<2.0",
+    "ruff>=0.6",
+    "ty",
+    "pre-commit>=3.7",
+    "bump-my-version>=0.21",
+    "pytest>=8.0",
+    "pytest-benchmark>=4.0",
+    "pytest-sugar>=1.0",
+    "pytest-xdist>=3.5",
+    "pytest-cov>=5.0",
+    "nox>=2024.4",
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.25",
+    "mkdocs-section-index>=0.3",
+]
 
 [build-system]
-requires = ["poetry-core", "setuptools>=67.5.1", "Cython==3.0.0a11", "numpy>=1.24.2"]
-build-backend = "poetry.core.masonry.api"
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+# The Rust extension is exposed as `TensorState._TensorState_rs` so it can
+# coexist with the (now-optional) Cython extension `TensorState._TensorState`,
+# which is kept in-tree for regression testing only and built via
+# `scripts/build-cython.sh` on demand.
+module-name = "TensorState._TensorState_rs"
+manifest-path = "crates/tensorstate-core/Cargo.toml"
+python-source = "src"
+features = ["pyo3/extension-module"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py313"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "D",    # pydocstyle
+    "ANN",  # flake8-annotations
+    "BLE",  # flake8-blind-except
+    "C4",   # flake8-comprehensions
+    "FBT",  # flake8-boolean-trap
+    "ICN",  # flake8-import-conventions
+    "ISC",  # flake8-implicit-str-concat
+    "N",    # pep8-naming
+    "NPY",  # numpy-specific
+    "PIE",  # flake8-pie
+    "PT",   # flake8-pytest-style
+    "PTH",  # flake8-use-pathlib
+    "Q",    # flake8-quotes
+    "RET",  # flake8-return
+    "RSE",  # flake8-raise
+    "RUF",  # ruff-specific
+    "SIM",  # flake8-simplify
+    "TC",   # flake8-type-checking
+    "TID",  # flake8-tidy-imports
+    "TRY",  # tryceratops
+]
+ignore = [
+    "D100",    # missing docstring in public module
+    "D104",    # missing docstring in public package
+    "D203",    # 1 blank line required before class docstring (conflicts with D211)
+    "D213",    # multi-line docstring summary should start at second line (conflicts with D212)
+    "ANN401",  # dynamically typed expressions (Any) — research code uses Any
+    "TRY003",  # avoid long messages outside exception class — too restrictive
+    # Deferred until the docstring + type-annotation pass is finished
+    "D101",    # undocumented-public-class
+    "D102",    # undocumented-public-method
+    "D105",    # undocumented-magic-method
+    "D107",    # undocumented-public-init
+    "ANN001",  # missing-type-function-argument
+    "ANN002",  # missing-type-args
+    "ANN003",  # missing-type-kwargs
+    "ANN201",  # missing-return-type-undocumented-public-function
+    "ANN202",  # missing-return-type-private-function
+    "ANN204",  # missing-return-type-special-method
+    "ANN206",  # missing-return-type-class-method
+    # The package directory is `TensorState/` by deliberate choice (it's the
+    # public import name and renaming would break every downstream user);
+    # the modules inside are snake_case as of AIQ-18.
+    "N999",    # invalid-module-name (package name is CamelCase, intentional)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D", "ANN", "S101", "N803", "N806", "NPY002"]
+"benches/**" = ["D", "ANN", "T201", "E501"]
+# Examples are demo scripts; relax most rules so they read naturally.
+"examples/**" = [
+    "D", "ANN", "T201", "E501",
+    "B007", "B905", "C416",
+    "FBT001", "FBT002", "FBT003",
+    "N813", "N814", "N816",
+    "NPY002", "RET504", "F821",
+]
+# setup.py is a small Cython build hook.
+"setup.py" = ["ICN001", "D"]
+# Triton kernels use ALL_CAPS for compile-time constants by convention.
+"src/TensorState/states.py" = ["N803", "N806"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.format]
+# Defaults: double quotes, 4-space indent, magic trailing comma respected.
+
+[tool.ty.src]
+include = ["src", "tests"]
+
+[tool.ty.environment]
+python-version = "3.13"
+
+# Rules deferred until the type-annotation + narrowing refactor lands.
+# These are surfaced by ty but require non-trivial code changes to fix
+# properly (e.g., narrowing `data: ModuleData` on each OpNode subclass).
+[tool.ty.rules]
+unresolved-attribute = "warn"
+invalid-attribute-access = "warn"
+invalid-assignment = "warn"
+invalid-argument-type = "warn"
+not-subscriptable = "warn"
+call-non-callable = "warn"
+
+[tool.bumpversion]
+current_version = "0.5.0"
+parse = '''(?x)
+    (?P<major>\d+)
+    \.(?P<minor>\d+)
+    \.(?P<patch>\d+)
+    (?:\.(?P<release>dev)(?P<dev>\d+))?
+'''
+serialize = [
+    "{major}.{minor}.{patch}.{release}{dev}",
+    "{major}.{minor}.{patch}",
+]
+commit = true
+tag = true
+allow_dirty = false
+
+[tool.bumpversion.parts.release]
+optional_value = "_"
+first_value = "dev"
+values = ["dev", "_"]
+
+[tool.bumpversion.parts.dev]
+first_value = "1"
+
+[[tool.bumpversion.files]]
+filename = "VERSION"
+
+[[tool.bumpversion.files]]
+filename = "src/TensorState/__init__.py"
+search = '__version__ = "{current_version}"'
+replace = '__version__ = "{new_version}"'

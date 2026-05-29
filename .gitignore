@@ -161,10 +161,23 @@ cython_debug/
 
 lightning_logs
 *.cpp
-setup.py
 .data
 data
 TensorState.egg-info
 TensorState/_TensorState.cp*
 TensorState/_TensorState.html
 TensorState/__pycache__
+
+# Rust build artifacts
+/target/
+/Cargo.lock
+
+# Design / decision documents — per project policy, design discussion
+# lives in Plane, not in the library repo. The decisions/ directory
+# is a scratchpad for proposals; nothing in it is committed.
+decisions/
+
+# MCP server configuration — contains credentials (PLANE_API_KEY,
+# PLANE_PASSWORD). Never commit.
+.mcp.json
+.claude/

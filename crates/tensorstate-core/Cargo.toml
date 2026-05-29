@@ -1,0 +1,27 @@
+[package]
+name = "tensorstate-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Rust core of the TensorState neural-network analysis library: bit-packing, decompression, and lex-sort primitives. Cross-platform SIMD with runtime dispatch."
+
+[lib]
+name = "_tensorstate_rs"
+# cdylib for the Python extension; rlib so the crate can be linked from
+# integration tests in `tests/` and any other Rust consumer.
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.28", features = ["extension-module"] }
+numpy = "0.28"
+ndarray = "0.17"
+
+[features]
+default = []
+# When enabled, the build expects nightly Rust and uses portable_simd / std::simd
+# instead of arch-specific intrinsics. Off by default; SIMD lives in
+# arch-specific modules using std::arch directly.
+portable-simd = []

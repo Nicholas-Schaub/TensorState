@@ -1,125 +1,87 @@
-import cupy
 import numpy as np
 import pytest
+import torch
 
-from TensorState import States
+from TensorState import states as States  # noqa: N812 -- preserves local alias
 
 
-@pytest.mark.parametrize("num_neurons", list(2**n for n in range(10, 16)))
-def test_roundtrip(num_neurons, compression):
-    a = (np.random.rand(10000, num_neurons) - 0.5).astype(np.float32)
+def _make_input(compression, num_neurons, dtype="float32"):
+    """Build the test input for the requested backend and dtype.
 
-    if compression == "cupy":
-        b = cupy.asarray(a)
+    Returns ``(mask, payload)`` where ``mask`` is the ground-truth boolean
+    firing mask (``> 0``) and ``payload`` is what gets fed to
+    ``compress_states`` in the requested dtype/backend.
+    """
+    rng = np.random.default_rng(0)
+    a = (rng.random((2000, num_neurons)) - 0.5).astype(np.float32)
+    mask = a > 0
+
+    if dtype == "float32":
+        payload_np = a
+    elif dtype == "bool":
+        payload_np = mask
     else:
-        b = a
+        raise ValueError(f"Unknown dtype: {dtype}")
 
-    compressed = States.compress_states(b)
+    if compression == "numpy":
+        return mask, payload_np
+    if compression == "torch":
+        return mask, torch.from_numpy(payload_np)
+    if compression == "torch_cuda":
+        if not torch.cuda.is_available():
+            pytest.skip("torch.cuda not available")
+        return mask, torch.from_numpy(payload_np).cuda()
+    raise ValueError(f"Unknown compression backend: {compression}")
 
-    if compression == "cupy":
-        compressed = compressed.get()
+
+@pytest.mark.parametrize("dtype", ["float32", "bool"])
+@pytest.mark.parametrize("num_neurons", [2**n for n in range(10, 16)])
+def test_roundtrip(num_neurons, compression, dtype):
+    """Bit-pack then decompress; the result must match the > 0 mask of the input."""
+    mask, payload = _make_input(compression, num_neurons, dtype=dtype)
+    compressed = States.compress_states(payload)
+
+    if isinstance(compressed, torch.Tensor):
+        compressed = compressed.cpu().numpy()
 
     decompressed = States.decompress_states(compressed, num_neurons=num_neurons)
 
-    assert np.all((a > 0) == decompressed)
+    assert np.all(mask == decompressed)
 
 
-@pytest.mark.parametrize("num_neurons", list(2**n for n in range(10, 16)))
+@pytest.mark.parametrize("dtype", ["float32", "bool"])
+@pytest.mark.parametrize("num_neurons", [1, 7, 9, 13, 17, 1000, 1023])
+def test_roundtrip_partial_byte(num_neurons, dtype):
+    """Roundtrip with neuron counts that are not multiples of 8.
+
+    Exercises the partial-byte tail of the bit-pack / unpack on both the
+    float32 and bool numpy paths.
+    """
+    mask, payload = _make_input("numpy", num_neurons, dtype=dtype)
+    compressed = States.compress_states(payload)
+    decompressed = States.decompress_states(compressed, num_neurons=num_neurons)
+    assert np.all(mask == decompressed)
+
+
+@pytest.mark.parametrize("num_neurons", [8, 17, 64, 1023, 1024])
+def test_compress_dtype_equivalence(num_neurons):
+    """float32 and its bool > 0 mask must compress to identical bytes.
+
+    Guards the bool numpy path (``_compress_tensor_pi8`` via uint8 view)
+    against drifting from the float32 path (``_compress_tensor_ps``).
+    """
+    rng = np.random.default_rng(1)
+    a = (rng.random((512, num_neurons)) - 0.5).astype(np.float32)
+    mask = a > 0
+
+    packed_f32 = States.compress_states(a)
+    packed_bool = States.compress_states(mask)
+
+    assert np.array_equal(packed_f32, packed_bool)
+
+
+@pytest.mark.parametrize("num_neurons", [2**n for n in range(10, 16)])
 def test_benchmark_compress(num_neurons, compression, benchmark):
-    a = (np.random.rand(10000, num_neurons) - 0.5).astype(np.float32)
-
-    if compression == "cupy":
-        b = cupy.asarray(a)
-    else:
-        b = a
-
+    """Benchmark compress_states for the requested backend."""
+    _, b = _make_input(compression, num_neurons)
     benchmark(States.compress_states, b)
-
-
-# n_neurons = 128
-# num_threads = 1
-
-# # modified from cupy source
-# # https://github.com/cupy/cupy/blob/v8.1.0/cupy/_binary/packing.py#L16
-# _compress_kernel = cupy.core.ElementwiseKernel(
-#     "raw T myarray, raw int64 myarray_size, raw int64 in_cols, raw int64 out_cols, raw int64 stride",
-#     "uint8 packed",
-#     """
-#     long row = i / out_cols;
-#     long col = (i % out_cols) * stride;
-#     long k = row * in_cols + col;
-#     long nvals = (col + stride - 1 < in_cols) ? stride : in_cols - col;
-#     for (long j = 0; j < nvals; ++j) {
-#         int bit = myarray[k+j] != 0;
-#         packed |= bit << j;
-#     }""",
-#     "packbits_kernel",
-# )
-
-
-# # modified from cupy source
-# # https://github.com/cupy/cupy/blob/v8.1.0/cupy/_binary/packing.py#L16
-# def _compress_states_cuda(states):
-#     myarray = (states > 0).ravel()
-#     nrows = states.shape[0]
-#     ncols = (states.shape[1] + 7) // 8
-#     packed_size = nrows * ncols
-#     packed = cupy.zeros((packed_size,), dtype=cupy.uint8)
-#     stride = min([8, states.shape[1]])
-#     return _compress_kernel(
-#         myarray, myarray.size, states.shape[1], ncols, stride, packed
-#     ).reshape(nrows, ncols)
-
-
-# # Generate some random numbers to act as state information
-# a = (np.random.rand(100000, n_neurons) - 0.5).astype(np.float32)
-# # a[a<=0] = 0.0
-
-# # b = ts.compress_states(a)
-# # print(b)
-# # bins,ind = ts.sort_states(b,10)
-# # print(b[ind])
-# # print(bins)
-# # print(ts.compress_states(a))
-# # print(np.packbits(a>0,axis=1,bitorder='little'))
-# # aa = cupy.asarray(a)
-# # print(str(aa.device))
-# # print(ts.compress_states(aa>0))
-
-# # Run state compression, np.float32 -> np.uint8
-# replicates = 500
-# aa = cupy.asarray(a)
-# start = time.time()
-# for _ in range(replicates):
-#     b = ts.compress_states(aa.get())
-# print(time.time() - start)
-
-# aa = cupy.asarray(a)
-# start = time.time()
-# for _ in range(replicates):
-#     b = ts.compress_states((aa > 0).get())
-# print(time.time() - start)
-
-# start = time.time()
-# for _ in range(replicates):
-#     b = np.packbits(a > 0, axis=1, bitorder="little")
-# print(time.time() - start)
-
-# aa = cupy.asarray(a)
-# start = time.time()
-# for _ in range(replicates):
-#     bb = _compress_states_cuda(aa > 0).get()
-# print(time.time() - start)
-
-# # Make sure cupy and numpy are equal
-# print(f"CuPy and NumPy equal: {np.array_equal(b, bb.get())}")
-
-# # Run and test decompression, np.uint8 -> np.bool_
-# c = ts.decompress_states(b, n_neurons)
-# print(c.dtype)
-# print(f"Decompressed equals original: {np.array_equal(a > 0, c)}")
-
-# # Run and test recompression, np.bool_ -> np.uint8
-# d = ts.compress_states(c)
-# print(d.dtype)
-# print(f"Recompressed equals original: {np.array_equal(b, d)}")

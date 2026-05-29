@@ -1,8 +1,0 @@
-name: tensorwheels
-channels:
-  - conda-forge
-dependencies:
-  - numpy
-  - setuptools
-  - conda-forge::compilers
-  - conda-forge::gsl

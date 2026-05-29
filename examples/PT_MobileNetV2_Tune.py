@@ -1,27 +1,35 @@
+from concurrent.futures import ThreadPoolExecutor
+
 import lightning as pl
 import torch
 from torch.utils.data import DataLoader
 from torchmetrics import Accuracy
 from torchvision.datasets import CIFAR10
 from torchvision.models import MobileNetV2 as MV2
+from torchvision.ops.misc import Conv2dNormActivation
 from torchvision.transforms import Compose, RandAugment, Resize, ToTensor
 
 import TensorState as ts
 
 
 class AccuracyCallback(pl.Callback):
-    def on_train_start(self, trainer, pl_module):
-        pl_module.accuracy.reset()
+    def on_train_epoch_start(self, trainer, pl_module):
         ts.reset_efficiency_model(pl_module)
+        for layer in ts.layers(pl_module).values():
+            layer.capture_on = False
+        pl_module.accuracy.reset()
 
-    def on_validation_start(self, trainer, pl_module):
-        entropy = sum(layer.entropy() for layer in pl_module.efficiency_layers)
-        pl_module.log("entropy/train", entropy)
+    def on_validation_epoch_start(self, trainer, pl_module):
+        for layer in ts.layers(pl_module).values():
+            layer.capture_on = True
         pl_module.accuracy.reset()
         ts.reset_efficiency_model(pl_module)
 
     def on_validation_epoch_end(self, trainer, pl_module):
-        entropy = sum(layer.entropy() for layer in pl_module.efficiency_layers)
+        with ThreadPoolExecutor(4) as executor:
+            entropy = sum(
+                executor.map(lambda x: x.entropy(), ts.layers(pl_module).values())
+            )
         pl_module.log("entropy/val", entropy)
 
 
@@ -82,7 +90,7 @@ if __name__ == "__main__":
 
     # sm = StockModel().to(dev)
     model = MobileNetV2(weights="IMAGENET1K_V1", num_classes=10)
-    model = ts.build_efficiency_model(model, attach_to=["Conv2dNormActivation"])
+    model = ts.attach(model, ts.match(types=Conv2dNormActivation), memory_device="gpu")
 
     # Create the augmentation transform
     compose = Compose(
@@ -96,13 +104,13 @@ if __name__ == "__main__":
         CIFAR10(".data", transform=compose, train=True, download=True),
         batch_size=200,
         shuffle=True,
-        num_workers=16,
+        num_workers=8,
         persistent_workers=True,
     )
     test_dl = DataLoader(
         CIFAR10(".data", transform=compose, train=False, download=True),
         batch_size=200,
-        num_workers=16,
+        num_workers=8,
         persistent_workers=True,
     )
 

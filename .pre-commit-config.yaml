@@ -1,47 +1,46 @@
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.4.0
+    rev: v5.0.0
     hooks:
-      - id: end-of-file-fixer
       - id: trailing-whitespace
-        exclude: .bumpversion.cfg
+        exclude: \.bumpversion\.cfg$
+      - id: end-of-file-fixer
       - id: check-yaml
+      - id: check-toml
       - id: check-json
-      - id: mixed-line-ending
-        args: ['--fix=lf']
-        description: Forces to replace line ending by the UNIX 'lf' character.
-      - id: pretty-format-json
-        args: ['--no-sort-keys']
+        # .vscode/ uses JSONC (JSON with comments).
+        exclude: ^\.vscode/
       - id: check-added-large-files
-        args: ['--maxkb=500']
-  - repo: https://github.com/PyCQA/flake8
-    rev: 6.0.0
+        args: ["--maxkb=500"]
+      - id: mixed-line-ending
+        args: ["--fix=lf"]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.14
     hooks:
-      - id: flake8
-        files: src/
-        additional_dependencies: ["flake8-docstrings==1.7.0"]
-  - repo: https://github.com/myint/autoflake
-    rev: v2.0.1
+      - id: ruff
+        args: ["--fix"]
+      - id: ruff-format
+
+  - repo: local
     hooks:
-      - id: autoflake
-        args: ["--in-place", "--remove-all-unused-imports"]
-  - repo: https://github.com/PyCQA/isort
-    rev: 5.12.0
+      - id: ty
+        name: ty (type check)
+        entry: uv run --group dev ty check
+        language: system
+        types: [python]
+        pass_filenames: false
+
+  - repo: https://github.com/crate-ci/typos
+    rev: v1.27.0
     hooks:
-      - id: isort
-        args: ["--profile", "black", "--filter-files"]
-  - repo: https://github.com/asottile/pyupgrade
-    rev: v3.3.1
+      - id: typos
+
+  - repo: https://github.com/executablebooks/mdformat
+    rev: 0.7.18
     hooks:
-      - id: pyupgrade
-        args: [--py38-plus, --keep-runtime-typing]
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.1.1
-    hooks:
-      - id: mypy
-        files: src
-        additional_dependencies: [types-requests==2.28.11.8]
-  - repo: https://github.com/psf/black
-    rev: 23.1.0
-    hooks:
-      - id: black
+      - id: mdformat
+        additional_dependencies:
+          - mdformat-gfm
+          - mdformat-frontmatter
+        files: \.(md|markdown)$

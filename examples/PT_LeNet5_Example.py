@@ -74,7 +74,7 @@ class LeNet5(nn.Module):
         return x.view(-1, x.size(1))
 
 
-# Create the Keras model
+# Create the PyTorch model
 model = LeNet5().to(dev)
 
 """ Train the model """
@@ -120,15 +120,7 @@ for epoch in range(num_epochs):
     valid_accuracy = np.sum(np.multiply(accuracies, nums)) / np.sum(nums)
 
     print(
-        "Epoch {}/{} ({:.2f}s): TrainLoss={:.4f}, TrainAccuracy={:.2f}%, ValidLoss={:.4f}, ValidAccuracy={:.2f}%".format(
-            str(epoch + 1).zfill(3),
-            num_epochs,
-            time.time() - start,
-            train_loss,
-            100 * train_accuracy,
-            valid_loss,
-            100 * valid_accuracy,
-        )
+        f"Epoch {str(epoch + 1).zfill(3)}/{num_epochs} ({time.time() - start:.2f}s): TrainLoss={train_loss:.4f}, TrainAccuracy={100 * train_accuracy:.2f}%, ValidLoss={valid_loss:.4f}, ValidAccuracy={100 * valid_accuracy:.2f}%"
     )
 
     # Early stopping criteria
@@ -143,9 +135,7 @@ for epoch in range(num_epochs):
 
 """ Evaluate model efficiency """
 # Attach StateCapture layers to the model
-efficiency_model = ts.build_efficiency_model(
-    model, attach_to=["Conv2d"], method="after"
-)
+efficiency_model = ts.attach(model, ts.match(types=nn.Conv2d), when="after")
 
 # Collect the states for each layer
 print()
@@ -161,18 +151,16 @@ print(f"Finished in {time.time() - start:.3f}s!")
 # Count the number of states in each layer
 print()
 print("Getting the number of states in each layer...")
-for layer in efficiency_model.efficiency_layers:
+for layer in ts.layers(efficiency_model).values():
     print(f"Layer {layer.name} number of states: {layer.state_count}")
 
 # Calculate each layers efficiency
 print()
 print("Evaluating efficiency of each layer...")
-for layer in efficiency_model.efficiency_layers:
+for layer in ts.layers(efficiency_model).values():
     start = time.time()
     print(
-        "Layer {} efficiency: {:.1f}% ({:.3f}s)".format(
-            layer.name, 100 * layer.efficiency(), time.time() - start
-        )
+        f"Layer {layer.name} efficiency: {100 * layer.efficiency():.1f}% ({time.time() - start:.3f}s)"
     )
 
 # Calculate the aIQ

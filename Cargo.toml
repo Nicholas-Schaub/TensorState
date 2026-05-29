@@ -1,0 +1,21 @@
+[workspace]
+resolver = "2"
+members = ["crates/tensorstate-core"]
+
+[workspace.package]
+version = "0.5.0-dev1"
+edition = "2024"
+rust-version = "1.95"
+authors = ["Nicholas Schaub <nicholas.j.schaub@gmail.com>"]
+license = "MIT"
+repository = "https://github.com/Nicholas-Schaub/TensorState"
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+panic = "abort"
+
+[profile.bench]
+inherits = "release"
+debug = true
