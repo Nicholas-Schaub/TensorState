@@ -8,6 +8,7 @@ logger = logging.getLogger("TensorState")
 
 from .core import (  # noqa
     aIQ,
+    advance_step,
     attach,
     build_efficiency_model,
     efficiency,
@@ -25,4 +26,4 @@ from .layers import Probe, StateCaptureHook  # noqa
 from .models import LeNet_5, mobilenet_v2  # noqa
 from .states import compress_states, decompress_states, sort_states  # noqa
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"

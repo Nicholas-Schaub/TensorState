@@ -177,6 +177,12 @@ TensorState/__pycache__
 # is a scratchpad for proposals; nothing in it is committed.
 decisions/
 
+# Paper drafts and novel-research notes. Kept uncommitted in this repo
+# until a draft is published on arXiv (then the public version lives
+# elsewhere). The papers/ directory mirrors the source layout of the
+# neurofilament/papers/ tree.
+papers/
+
 # MCP server configuration — contains credentials (PLANE_API_KEY,
 # PLANE_PASSWORD). Never commit.
 .mcp.json

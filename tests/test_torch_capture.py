@@ -19,18 +19,24 @@ def test_build_efficiency_model_threads_memory_limit_and_to_arrow():
 
     for probe in ts.layers(model).values():
         assert isinstance(probe, StateCaptureHook)
-        # memory_limit flowed all the way to the AbstractStateCapture instance.
+        # memory_limit flowed all the way to the probe.
         assert probe._memory_limit == "1GB"
-        # Arrow handle materializes a Table with the expected row count.
+        # Arrow handle materializes a Table with the expected row count. The
+        # DuckDB schema is now (step_id BIGINT, s BLOB) -- both columns must
+        # be present and row count must match state_count.
         tbl = probe.to_arrow()
         assert tbl.num_rows == probe.state_count
-        assert tbl.schema.field(0).name == "s"
+        assert {"step_id", "s"} <= set(tbl.schema.names)
 
 
 def test_duckdb_store_counts_match_numpy():
     """DuckDB GROUP BY counting must match a numpy reference (AIQ-36/37)."""
     model = ts_testing.small_model("lenet5", num_classes=10)
-    ts.build_efficiency_model(model, attach_to=["Conv2dNormActivation"])
+    # Pin the DuckDB backend so this test actually exercises the GROUP BY
+    # path (the new auto-select would pick host on a CPU box, gpu on CUDA).
+    ts.build_efficiency_model(
+        model, attach_to=["Conv2dNormActivation"], memory_limit="1GB"
+    )
     model.eval()
     with torch.no_grad():
         model(torch.randn(8, 3, 64, 64))
@@ -41,11 +47,16 @@ def test_duckdb_store_counts_match_numpy():
         assert isinstance(probe, StateCaptureHook)
         counts = probe.counts()
         ids = probe.state_ids()
-        # state_ids and counts are aligned, and counts sum to the total.
+        # state_ids and counts are aligned over the unique-microstate set.
         assert len(ids) == len(counts)
+        # Counts sum to the total in-window post-batch-dedup row count.
         assert int(counts.sum()) == probe.state_count
-        # The GROUP BY counts must match unique-row counts computed by numpy.
-        _, ref = np.unique(probe.raw_states, axis=0, return_counts=True)
+        # GROUP BY counts agree with a numpy reference over the raw rows.
+        # raw_states is now unique-in-window, so source the reference from
+        # the unaggregated Arrow table instead.
+        s_col = probe.to_arrow().column("s").to_pylist()
+        arr = np.stack([np.frombuffer(b, dtype=np.uint8) for b in s_col])
+        _, ref = np.unique(arr, axis=0, return_counts=True)
         assert sorted(counts.tolist()) == sorted(ref.tolist())
 
 

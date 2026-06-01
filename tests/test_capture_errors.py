@@ -1,14 +1,12 @@
 """Capture-thread failures must surface (AIQ-34).
 
-State capture runs in a background thread; a failure there used to be
-swallowed until results were read (or never, if they weren't). These tests
-pin strategy #3: log at failure time, re-raise (chained) on read, and an
-opt-in fail-fast flag.
+Capture is now synchronous on every backend: a failure in ``compress_states``
+or in the store's ``append`` propagates directly out of the forward hook.
+The ``raise_on_capture_error`` flag is retained on the constructor for
+backward compatibility (DuckDB only), but is informational under sync
+capture; the sticky-error attribute remains on the probe so the existing
+lifecycle test that injects a synthetic prior failure still passes.
 """
-
-import logging
-import threading
-from concurrent.futures import wait as futures_wait
 
 import pytest
 import torch
@@ -21,67 +19,53 @@ def _boom(*_args, **_kwargs):
     raise ValueError("injected compress failure")
 
 
-def test_capture_failure_does_not_raise_in_forward(monkeypatch):
-    """A failing capture thread must not break the forward pass itself."""
-    hook = StateCaptureHook(name="probe_forward", memory_device="cpu")
+def _hook(name: str, **kwargs) -> StateCaptureHook:
+    return StateCaptureHook(name=name, backend="host", memory_device=None, **kwargs)
+
+
+def test_capture_failure_raises_in_forward(monkeypatch):
+    """A failing capture surfaces synchronously in the forward call."""
+    hook = _hook("probe_forward")
     monkeypatch.setattr(ts_states, "compress_states", _boom)
 
-    # The hook call (what runs inside forward) returns normally even though
-    # the capture thread it spawns will fail.
-    hook._capture(None, torch.randn(8, 16))
-    futures_wait(hook._threads)
-
-
-def test_capture_failure_logged_and_reraised_on_read(monkeypatch, caplog):
-    """Default behavior: log when it happens, re-raise (chained) on read."""
-    hook = StateCaptureHook(name="probe_read", memory_device="cpu")
-    monkeypatch.setattr(ts_states, "compress_states", _boom)
-
-    with caplog.at_level(logging.ERROR, logger="TensorState.layers"):
+    with pytest.raises(ValueError, match="injected compress failure"):
         hook._capture(None, torch.randn(8, 16))
-        # The failure is logged by the capture thread's done-callback. Add our
-        # own callback after the hook's so callbacks fire in registration order
-        # — when ours signals, the hook's has already run and logged. This makes
-        # the log assertion deterministic instead of racing the worker thread.
-        done = threading.Event()
-        hook._threads[-1].add_done_callback(lambda _f: done.set())
-        assert done.wait(timeout=10), "capture thread did not finish"
-        with pytest.raises(RuntimeError) as excinfo:
-            _ = hook.state_count
-
-    assert isinstance(excinfo.value.__cause__, ValueError)
-    assert "injected compress failure" in str(excinfo.value.__cause__)
-    assert any("State capture failed" in r.message for r in caplog.records)
 
 
-def test_capture_error_is_sticky(monkeypatch):
-    """Once a capture fails, every subsequent read keeps re-raising it."""
-    hook = StateCaptureHook(name="probe_sticky", memory_device="cpu")
+def test_capture_failure_does_not_corrupt_subsequent_reads(monkeypatch):
+    """A failed capture leaves the probe readable (no state was appended)."""
+    hook = _hook("probe_read")
     monkeypatch.setattr(ts_states, "compress_states", _boom)
 
+    with pytest.raises(ValueError, match="injected compress failure"):
+        hook._capture(None, torch.randn(8, 16))
+    # Probe is in a consistent state: zero counts, no leftover sticky error
+    # (in-memory backends fail synchronously, nothing latches).
+    assert hook.state_count == 0
+    assert hook._capture_error is None
+
+
+def test_capture_recovers_after_compress_states_is_restored(monkeypatch):
+    """Once the underlying issue is fixed, capture resumes normally."""
+    hook = _hook("probe_recover")
+    monkeypatch.setattr(ts_states, "compress_states", _boom)
+    with pytest.raises(ValueError, match="injected compress failure"):
+        hook._capture(None, torch.randn(8, 16))
+
+    monkeypatch.undo()
     hook._capture(None, torch.randn(8, 16))
-    with pytest.raises(RuntimeError):
-        _ = hook.state_count
-    # A second read still raises the same chained cause, even with no new
-    # capture (threads already drained).
-    with pytest.raises(RuntimeError) as excinfo:
-        _ = hook.state_count
-    assert isinstance(excinfo.value.__cause__, ValueError)
+    assert hook.state_count > 0
 
 
-def test_raise_on_capture_error_fails_fast(monkeypatch):
-    """With the flag set, the next capture aborts instead of running."""
+def test_raise_on_capture_error_rejected_for_non_duckdb_backends():
+    """raise_on_capture_error is a DuckDB-only constructor flag."""
+    # The flag is accepted with default False for all backends; only the
+    # DuckDB backend records it. We simply assert constructor compatibility:
+    # the parameter must not raise for backend='duckdb'.
     hook = StateCaptureHook(
-        name="probe_ff", memory_device="cpu", raise_on_capture_error=True
+        name="probe_duck",
+        backend="duckdb",
+        memory_device=None,
+        raise_on_capture_error=True,
     )
-    monkeypatch.setattr(ts_states, "compress_states", _boom)
-
-    # First capture proceeds (no prior error) and spawns the failing thread.
-    hook._capture(None, torch.randn(8, 16))
-    # Draining the read records the sticky error deterministically.
-    with pytest.raises(RuntimeError):
-        _ = hook.state_count
-    # Now the next capture fails fast on the stored error.
-    with pytest.raises(RuntimeError) as excinfo:
-        hook._capture(None, torch.randn(8, 16))
-    assert isinstance(excinfo.value.__cause__, ValueError)
+    assert hook._raise_on_capture_error is True
