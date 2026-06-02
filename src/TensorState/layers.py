@@ -256,7 +256,9 @@ class StateCaptureHook(Probe):
         """Renyi entropy of order ``alpha`` (``None`` returns the theoretical max)."""
         if alpha is None:
             return self.max_entropy()
-        return float(TensorState.entropy(self.counts(), alpha))
+        result = TensorState.entropy(self.counts(), alpha)
+        assert isinstance(result, (int, float))
+        return float(result)
 
     def efficiency(self, alpha1: float = 1, alpha2: float | None = None) -> float:
         """Layer efficiency: ``entropy(alpha1) / entropy(alpha2)``."""
@@ -318,16 +320,19 @@ class StateCaptureHook(Probe):
                 # intermediate uint8 tensor.
                 packed = ts.compress_states(x)
                 assert isinstance(packed, torch.Tensor)
-                uniq = torch.unique(packed, dim=0)
+                uniq_t = torch.unique(packed, dim=0)
+                assert self._store is not None
+                assert isinstance(self._store, GPUMemoryStore)
+                self._store.append(self._step_id, uniq_t)
             else:
                 # Host / DuckDB: thresholded bool -> Rust _compress_tensor_pi8.
                 bits_np = (x > 0).cpu().numpy()
                 packed_np = ts.compress_states(bits_np)
                 assert isinstance(packed_np, np.ndarray)
-                uniq = np.unique(packed_np, axis=0)
-
-        assert self._store is not None
-        self._store.append(self._step_id, uniq)
+                uniq_np = np.unique(packed_np, axis=0)
+                assert self._store is not None
+                assert isinstance(self._store, (HostMemoryStore, _StateStore))
+                self._store.append(self._step_id, uniq_np)
         # Invalidate read caches; the next read recomputes.
         self._states_cache = None
         self._counts_cache = None

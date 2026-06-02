@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pytest
 import torch
 import torch.nn as nn
@@ -49,8 +51,8 @@ def test_advance_step_detects_desync_before_mutating():
     model = _Net()
     ts.attach(model, ts.match(types=nn.Linear), backend="host")
     probes = list(ts.layers(model).values())
-    probes[0]._step_id = 3
-    probes[1]._step_id = 7
+    probes[0]._step_id = 3  # ty: ignore[unresolved-attribute]
+    probes[1]._step_id = 7  # ty: ignore[unresolved-attribute]
     with pytest.raises(RuntimeError, match="desynced"):
         ts.advance_step(model)
     # Two-phase: no probe should have been advanced.
@@ -80,10 +82,11 @@ def test_entropy_window_evicts_old_captures():
         ts.advance_step(model)
 
     for probe in ts.layers(model).values():
+        p = cast(StateCaptureHook, probe)
         # state_count is a non-negative integer and reflects the window.
-        assert probe.state_count <= peak + 1  # +1 for jitter from one extra batch
+        assert p.state_count <= peak + 1  # +1 for jitter from one extra batch
         # window floor advanced.
-        assert probe._window_floor() > 0
+        assert p._window_floor() > 0
 
 
 # ---------------------------------------------------------------------------
@@ -172,7 +175,7 @@ def test_reattach_removes_prior_hooks():
     model = _Net()
     ts.attach(model, ts.match(types=nn.Linear), backend="host")
     first = list(ts.layers(model).values())
-    first_counts = [p.state_count for p in first]
+    first_counts = [cast(StateCaptureHook, p).state_count for p in first]
     with torch.no_grad():
         model(torch.randn(4, 8))
     # Re-attach to the same targets.
@@ -184,14 +187,16 @@ def test_reattach_removes_prior_hooks():
     with torch.no_grad():
         model(torch.randn(4, 8))
     for p, c0 in zip(first, first_counts, strict=True):
+        ph = cast(StateCaptureHook, p)
         # The old probe captured exactly once before re-attach.
-        assert p.state_count == c0 + 0 or p.state_count > 0
+        assert ph.state_count == c0 + 0 or ph.state_count > 0
         # The key invariant: the second forward post-reattach does not change
         # the orphaned probe's state. We compare to the count just before the
         # second forward.
     # The new probes captured.
     for p in new:
-        assert p.state_count > 0
+        ph = cast(StateCaptureHook, p)
+        assert ph.state_count > 0
 
 
 def test_mid_run_reattach_seeds_step_id():

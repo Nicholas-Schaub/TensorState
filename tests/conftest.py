@@ -87,8 +87,8 @@ def _tiny_loaders(num_classes=10):
     test_ds = ts_testing.tiny_dataset(
         n=64, channels=3, size=64, num_classes=num_classes, seed=1
     )
-    train_ds.classes = list(range(num_classes))
-    test_ds.classes = list(range(num_classes))
+    train_ds.classes = list(range(num_classes))  # ty: ignore[unresolved-attribute]  # fixture injects torchvision-style .classes attribute
+    test_ds.classes = list(range(num_classes))  # ty: ignore[unresolved-attribute]  # fixture injects torchvision-style .classes attribute
     train_dl = torch.utils.data.DataLoader(train_ds, batch_size=64)
     test_dl = torch.utils.data.DataLoader(test_ds, batch_size=64)
     return train_dl, test_dl

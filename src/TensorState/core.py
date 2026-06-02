@@ -160,7 +160,7 @@ def network_efficiency(
     """
     # Extract efficiency values from a model with attached probes
     if isinstance(efficiencies, torch.nn.Module):
-        efficiencies = [p.efficiency() for p in layers(efficiencies).values()]
+        efficiencies = [p.efficiency() for p in layers(efficiencies).values()]  # ty: ignore[call-non-callable]  # Probe method shadowed by Module.__getattr__ -> Tensor|Module
     assert isinstance(efficiencies, list), (
         "Input must be a list or a module with attached state-capture hooks"
     )
@@ -245,8 +245,8 @@ def entropy(
     """
     if isinstance(model_or_counts, torch.nn.Module):
         if name is not None:
-            return layer(model_or_counts, name).entropy(alpha)
-        return {n: p.entropy(alpha) for n, p in _iter_probes(model_or_counts)}
+            return layer(model_or_counts, name).entropy(alpha)  # ty: ignore[call-non-callable]  # Probe method shadowed by Module.__getattr__ -> Tensor|Module
+        return {n: p.entropy(alpha) for n, p in _iter_probes(model_or_counts)}  # ty: ignore[call-non-callable]  # Probe method shadowed by Module.__getattr__ -> Tensor|Module
 
     if name is not None:
         raise TypeError("name= is only valid when the first argument is a model.")
@@ -343,9 +343,9 @@ def efficiency(
         ``reduce="geomean"``).
     """
     if name is not None:
-        return layer(model, name).efficiency(alpha1, alpha2)
+        return layer(model, name).efficiency(alpha1, alpha2)  # ty: ignore[call-non-callable]  # Probe method shadowed by Module.__getattr__ -> Tensor|Module
 
-    per_layer = {n: p.efficiency(alpha1, alpha2) for n, p in _iter_probes(model)}
+    per_layer = {n: p.efficiency(alpha1, alpha2) for n, p in _iter_probes(model)}  # ty: ignore[call-non-callable]  # Probe method shadowed by Module.__getattr__ -> Tensor|Module
 
     if reduce is None:
         return per_layer
@@ -395,7 +395,7 @@ def reset_efficiency_model(model: torch.nn.Module) -> None:
         model: Model to reset
     """
     for probe in layers(model).values():
-        probe.reset_states()
+        probe.reset_states()  # ty: ignore[call-non-callable]  # Probe method shadowed by Module.__getattr__ -> Tensor|Module
 
 
 def advance_step(model: torch.nn.Module) -> int:
@@ -424,7 +424,7 @@ def advance_step(model: torch.nn.Module) -> int:
         )
     new_id = 0
     for _name, probe in probes:
-        new_id = probe.advance_step()
+        new_id = probe.advance_step()  # ty: ignore[call-non-callable]  # Probe method shadowed by Module.__getattr__ -> Tensor|Module
     return new_id
 
 
@@ -560,7 +560,7 @@ def _attach_probes(
         default=0,
     )
 
-    model.state_capture_hooks = []
+    model.state_capture_hooks = []  # ty: ignore[unresolved-attribute]
     model._tensorstate_probes = torch.nn.ModuleDict()
 
     def _make(probe_name: str) -> StateCaptureHook:
@@ -583,19 +583,19 @@ def _attach_probes(
         if when in ("before", "both"):
             probe = _make(str(mod_name) + "_pre_states")
             model._tensorstate_probes[f"{base_key}_pre"] = probe
-            model.state_capture_hooks.append(
+            model.state_capture_hooks.append(  # ty: ignore[call-non-callable,unresolved-attribute]
                 module.register_forward_pre_hook(probe._capture)
             )
 
         if when in ("after", "both"):
             probe = _make(str(mod_name) + "_post_states")
             model._tensorstate_probes[f"{base_key}_post"] = probe
-            model.state_capture_hooks.append(
+            model.state_capture_hooks.append(  # ty: ignore[call-non-callable,unresolved-attribute]
                 module.register_forward_hook(probe._capture)
             )
 
     # Deprecated back-compat handle; new code should use TensorState.layers().
-    model.efficiency_layers = _DeprecatedProbeList(model)
+    model.efficiency_layers = _DeprecatedProbeList(model)  # ty: ignore[unresolved-attribute]
     return model
 
 
@@ -817,7 +817,7 @@ def remove_state_layers(model: torch.nn.Module) -> torch.nn.Module:
     """
     if hasattr(model, "state_capture_hooks"):
         # Runtime-added attribute; ty sees nn.Module.__getattr__'s union type.
-        hooks: list = model.state_capture_hooks
+        hooks: list = model.state_capture_hooks  # ty: ignore[invalid-assignment]
         for hook in hooks:
             hook.remove()
         del model.state_capture_hooks

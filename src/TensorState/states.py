@@ -189,8 +189,8 @@ def _compress_states_triton(states: torch.Tensor) -> torch.Tensor:
         n_rows,
         n_cols,
         out_cols,
-        BLOCK_N=BLOCK_N,
-        BLOCK_B=BLOCK_B,
+        BLOCK_N=BLOCK_N,  # ty: ignore[invalid-argument-type]
+        BLOCK_B=BLOCK_B,  # ty: ignore[invalid-argument-type]
     )
     return out
 

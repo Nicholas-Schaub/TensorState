@@ -78,7 +78,8 @@ def test_attach_idempotency_double_build_does_not_double_register():
     assert len(second_probes) == matched
     # And ``state_capture_hooks`` is fresh (one handle per probe with method=
     # "after", the default).
-    assert len(model.state_capture_hooks) == matched
+    hooks: list = model.state_capture_hooks  # ty: ignore[invalid-assignment]
+    assert len(hooks) == matched
 
 
 def test_detach_removes_probes_and_hooks():

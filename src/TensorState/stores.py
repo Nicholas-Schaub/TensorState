@@ -329,10 +329,12 @@ class _StateStore:
             self._buffer = keep_buffer
             self._buffered -= dropped_buffer
             # Delete on-disk rows and count what we actually removed.
-            (n_db_before,) = self._con.execute(
+            row = self._con.execute(
                 "SELECT COUNT(*) FROM states WHERE step_id < ?",
                 [int(min_step_id)],
             ).fetchone()
+            assert row is not None
+            (n_db_before,) = row
             self._con.execute(
                 "DELETE FROM states WHERE step_id < ?", [int(min_step_id)]
             )
@@ -372,10 +374,12 @@ class _StateStore:
             if min_step_id <= 0:
                 return int(self._n)
             self._flush_locked()
-            (n,) = self._con.execute(
+            row = self._con.execute(
                 "SELECT COUNT(*) FROM states WHERE step_id >= ?",
                 [int(min_step_id)],
             ).fetchone()
+            assert row is not None
+            (n,) = row
             return int(n)
 
     def to_arrow(self) -> pa.Table:
