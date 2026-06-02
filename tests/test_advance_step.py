@@ -82,7 +82,7 @@ def test_entropy_window_evicts_old_captures():
         ts.advance_step(model)
 
     for probe in ts.layers(model).values():
-        p = cast(StateCaptureHook, probe)
+        p = cast("StateCaptureHook", probe)
         # state_count is a non-negative integer and reflects the window.
         assert p.state_count <= peak + 1  # +1 for jitter from one extra batch
         # window floor advanced.
@@ -175,7 +175,7 @@ def test_reattach_removes_prior_hooks():
     model = _Net()
     ts.attach(model, ts.match(types=nn.Linear), backend="host")
     first = list(ts.layers(model).values())
-    first_counts = [cast(StateCaptureHook, p).state_count for p in first]
+    first_counts = [cast("StateCaptureHook", p).state_count for p in first]
     with torch.no_grad():
         model(torch.randn(4, 8))
     # Re-attach to the same targets.
@@ -187,7 +187,7 @@ def test_reattach_removes_prior_hooks():
     with torch.no_grad():
         model(torch.randn(4, 8))
     for p, c0 in zip(first, first_counts, strict=True):
-        ph = cast(StateCaptureHook, p)
+        ph = cast("StateCaptureHook", p)
         # The old probe captured exactly once before re-attach.
         assert ph.state_count == c0 + 0 or ph.state_count > 0
         # The key invariant: the second forward post-reattach does not change
@@ -195,7 +195,7 @@ def test_reattach_removes_prior_hooks():
         # second forward.
     # The new probes captured.
     for p in new:
-        ph = cast(StateCaptureHook, p)
+        ph = cast("StateCaptureHook", p)
         assert ph.state_count > 0
 
 

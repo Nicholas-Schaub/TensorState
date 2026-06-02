@@ -298,10 +298,10 @@ class ElementNode(Vertex):
         if not isinstance(module_type, tuple):
             module_type = (module_type,)
 
-        setattr(func, "_module_type", ())
+        func._module_type = ()
         for mt in module_type:
             cls.TYPES[mt] = func
-            setattr(func, "_module_type", (*func._module_type, mt))
+            func._module_type = *func._module_type, mt
         return func
 
     @classmethod
@@ -507,7 +507,7 @@ class BatchNormNode(ElementNode):
     data: ModuleData
 
     def dendrites(self):
-        layer = cast(torch.nn.modules.batchnorm._BatchNorm, self.data.module)
+        layer = cast("torch.nn.modules.batchnorm._BatchNorm", self.data.module)
         return layer.num_features
 
     neurons = dendrites
@@ -518,7 +518,7 @@ class BatchNormNode(ElementNode):
         Stores the merged value into the first member; other members are
         returned as redundant indices.
         """
-        layer = cast(torch.nn.modules.batchnorm._BatchNorm, self.data.module)
+        layer = cast("torch.nn.modules.batchnorm._BatchNorm", self.data.module)
         for group in groups:
             if len(group) < 2:
                 continue
@@ -539,7 +539,7 @@ class BatchNormNode(ElementNode):
     merge_inputs = merge_outputs  # BatchNorm has no separate input dim
 
     def destroy_outputs(self, idxs: list[int]):
-        layer = cast(torch.nn.modules.batchnorm._BatchNorm, self.data.module)
+        layer = cast("torch.nn.modules.batchnorm._BatchNorm", self.data.module)
         keep_idxs = sorted(set(range(layer.num_features)) - set(idxs))
         layer.num_features = layer.num_features - len(idxs)
 
@@ -568,13 +568,13 @@ class GroupNormNode(ElementNode):
     data: ModuleData
 
     def dendrites(self):
-        layer = cast(torch.nn.GroupNorm, self.data.module)
+        layer = cast("torch.nn.GroupNorm", self.data.module)
         return layer.num_channels
 
     neurons = dendrites
 
     def merge_outputs(self, groups: list[list[int]]) -> list[int]:
-        layer = cast(torch.nn.GroupNorm, self.data.module)
+        layer = cast("torch.nn.GroupNorm", self.data.module)
         if not layer.affine:
             return _redundant_idxs_from_groups(groups)
         for group in groups:
@@ -588,7 +588,7 @@ class GroupNormNode(ElementNode):
     merge_inputs = merge_outputs
 
     def destroy_outputs(self, idxs: list[int]):
-        layer = cast(torch.nn.GroupNorm, self.data.module)
+        layer = cast("torch.nn.GroupNorm", self.data.module)
         keep_idxs = sorted(set(range(layer.num_channels)) - set(idxs))
         layer.num_channels = layer.num_channels - len(idxs)
         # num_groups must still divide num_channels evenly. If not, downstream
@@ -615,7 +615,7 @@ class LayerNormNode(ElementNode):
         # LayerNorm normalizes over normalized_shape (possibly multi-dim).
         # We support the common case where normalized_shape is a single int
         # (last-dim normalization).
-        layer = cast(torch.nn.LayerNorm, self.data.module)
+        layer = cast("torch.nn.LayerNorm", self.data.module)
         shape = layer.normalized_shape
         if isinstance(shape, int):
             return shape
@@ -629,7 +629,7 @@ class LayerNormNode(ElementNode):
     neurons = dendrites
 
     def merge_outputs(self, groups: list[list[int]]) -> list[int]:
-        layer = cast(torch.nn.LayerNorm, self.data.module)
+        layer = cast("torch.nn.LayerNorm", self.data.module)
         if not layer.elementwise_affine:
             return _redundant_idxs_from_groups(groups)
         for group in groups:
@@ -644,7 +644,7 @@ class LayerNormNode(ElementNode):
     merge_inputs = merge_outputs
 
     def destroy_outputs(self, idxs: list[int]):
-        layer = cast(torch.nn.LayerNorm, self.data.module)
+        layer = cast("torch.nn.LayerNorm", self.data.module)
         n = self.dendrites()
         keep_idxs = sorted(set(range(n)) - set(idxs))
         new_n = n - len(idxs)
@@ -706,16 +706,16 @@ class ConvNode(OpNode):
     def __init__(self, data: GradientData | ModuleData):
         super().__init__(data)
         assert isinstance(data, ModuleData)
-        mod = cast(torch.nn.modules.conv._ConvNd, data.module)
+        mod = cast("torch.nn.modules.conv._ConvNd", data.module)
         if mod.groups != 1:
             raise NodeError
 
     def dendrites(self):
-        layer = cast(torch.nn.modules.conv._ConvNd, self.data.module)
+        layer = cast("torch.nn.modules.conv._ConvNd", self.data.module)
         return layer.in_channels
 
     def neurons(self):
-        layer = cast(torch.nn.modules.conv._ConvNd, self.data.module)
+        layer = cast("torch.nn.modules.conv._ConvNd", self.data.module)
         return layer.out_channels
 
     def merge_outputs(self, groups: list[list[int]]) -> list[int]:
@@ -724,7 +724,7 @@ class ConvNode(OpNode):
         Linearity rule: the producing-layer weights are *averaged* so the
         merged neuron's output equals the average of the originals.
         """
-        layer = cast(torch.nn.modules.conv._ConvNd, self.data.module)
+        layer = cast("torch.nn.modules.conv._ConvNd", self.data.module)
         for group in groups:
             if len(group) < 2:
                 continue
@@ -743,7 +743,7 @@ class ConvNode(OpNode):
         Linearity rule: the consuming-layer weights are *summed* so the new
         effective weight is `sum_i W_i` instead of `W_i * mean_signal`.
         """
-        layer = cast(torch.nn.modules.conv._ConvNd, self.data.module)
+        layer = cast("torch.nn.modules.conv._ConvNd", self.data.module)
         for group in groups:
             if len(group) < 2:
                 continue
@@ -755,7 +755,7 @@ class ConvNode(OpNode):
         return _redundant_idxs_from_groups(groups)
 
     def destroy_outputs(self, idxs: list[int]):
-        layer = cast(torch.nn.modules.conv._ConvNd, self.data.module)
+        layer = cast("torch.nn.modules.conv._ConvNd", self.data.module)
         keep_idxs = sorted(set(range(layer.out_channels)) - set(idxs))
         layer.out_channels -= len(idxs)
 
@@ -769,7 +769,7 @@ class ConvNode(OpNode):
         return keep_idxs, idxs
 
     def destroy_inputs(self, idxs: list[int]):
-        layer = cast(torch.nn.modules.conv._ConvNd, self.data.module)
+        layer = cast("torch.nn.modules.conv._ConvNd", self.data.module)
         keep_idxs = sorted(set(range(layer.in_channels)) - set(idxs))
         layer.in_channels = layer.in_channels - len(idxs)
 
@@ -790,23 +790,20 @@ class ConvGroupNode(ElementNode):
     def __init__(self, data: GradientData | ModuleData):
         super().__init__(data)
         assert isinstance(data, ModuleData)
-        mod = cast(torch.nn.modules.conv._ConvNd, data.module)
-        if (
-            mod.groups != mod.in_channels
-            and mod.in_channels != mod.out_channels
-        ):
+        mod = cast("torch.nn.modules.conv._ConvNd", data.module)
+        if mod.groups != mod.in_channels and mod.in_channels != mod.out_channels:
             raise NodeError
 
     def dendrites(self):
-        layer = cast(torch.nn.modules.conv._ConvNd, self.data.module)
+        layer = cast("torch.nn.modules.conv._ConvNd", self.data.module)
         return layer.in_channels
 
     def neurons(self):
-        layer = cast(torch.nn.modules.conv._ConvNd, self.data.module)
+        layer = cast("torch.nn.modules.conv._ConvNd", self.data.module)
         return layer.out_channels
 
     def merge_outputs(self, groups: list[list[int]]) -> list[int]:
-        layer = cast(torch.nn.modules.conv._ConvNd, self.data.module)
+        layer = cast("torch.nn.modules.conv._ConvNd", self.data.module)
         for group in groups:
             if len(group) < 2:
                 continue
@@ -822,7 +819,7 @@ class ConvGroupNode(ElementNode):
     merge_inputs = merge_outputs  # depthwise: in_channel == out_channel per group
 
     def destroy_outputs(self, idxs: list[int]):
-        layer = cast(torch.nn.modules.conv._ConvNd, self.data.module)
+        layer = cast("torch.nn.modules.conv._ConvNd", self.data.module)
         keep_idxs = sorted(set(range(layer.out_channels)) - set(idxs))
         layer.out_channels -= len(idxs)
 
@@ -851,16 +848,16 @@ class LinearNode(OpNode):
     data: ModuleData
 
     def dendrites(self):
-        layer = cast(torch.nn.Linear, self.data.module)
+        layer = cast("torch.nn.Linear", self.data.module)
         return layer.in_features
 
     def neurons(self):
-        layer = cast(torch.nn.Linear, self.data.module)
+        layer = cast("torch.nn.Linear", self.data.module)
         return layer.out_features
 
     def merge_outputs(self, groups: list[list[int]]) -> list[int]:
         """Average weight rows + bias entries across each group."""
-        layer = cast(torch.nn.Linear, self.data.module)
+        layer = cast("torch.nn.Linear", self.data.module)
         for group in groups:
             if len(group) < 2:
                 continue
@@ -872,7 +869,7 @@ class LinearNode(OpNode):
 
     def merge_inputs(self, groups: list[list[int]]) -> list[int]:
         """Sum weight columns across each group's input features."""
-        layer = cast(torch.nn.Linear, self.data.module)
+        layer = cast("torch.nn.Linear", self.data.module)
         for group in groups:
             if len(group) < 2:
                 continue
@@ -881,7 +878,7 @@ class LinearNode(OpNode):
         return _redundant_idxs_from_groups(groups)
 
     def destroy_outputs(self, idxs: list[int]):
-        layer = cast(torch.nn.Linear, self.data.module)
+        layer = cast("torch.nn.Linear", self.data.module)
         keep_idxs = sorted(set(range(layer.out_features)) - set(idxs))
         layer.out_features -= len(idxs)
         layer.weight = torch.nn.Parameter(layer.weight.data.clone()[keep_idxs])
@@ -890,7 +887,7 @@ class LinearNode(OpNode):
         return keep_idxs, idxs
 
     def destroy_inputs(self, idxs: list[int]):
-        layer = cast(torch.nn.Linear, self.data.module)
+        layer = cast("torch.nn.Linear", self.data.module)
         keep_idxs = sorted(set(range(layer.in_features)) - set(idxs))
         layer.in_features = layer.in_features - len(idxs)
         layer.weight = torch.nn.Parameter(layer.weight.data.clone()[:, keep_idxs])
@@ -933,11 +930,11 @@ class AttentionNode(OpNode):
     data: ModuleData
 
     def _hd(self) -> int:
-        layer = cast(torch.nn.MultiheadAttention, self.data.module)
+        layer = cast("torch.nn.MultiheadAttention", self.data.module)
         return layer.embed_dim // layer.num_heads
 
     def dendrites(self):
-        layer = cast(torch.nn.MultiheadAttention, self.data.module)
+        layer = cast("torch.nn.MultiheadAttention", self.data.module)
         return layer.embed_dim
 
     neurons = dendrites
@@ -958,7 +955,7 @@ class AttentionNode(OpNode):
         group's heads and its ``out_proj`` column-block becomes their sum.
         Only exact (identical-head) merges preserve the forward output.
         """
-        layer = cast(torch.nn.MultiheadAttention, self.data.module)
+        layer = cast("torch.nn.MultiheadAttention", self.data.module)
         e = layer.embed_dim
         hd = self._hd()
         w = layer.in_proj_weight.data
@@ -1001,7 +998,7 @@ class AttentionNode(OpNode):
         Decrements ``num_heads`` and ``embed_dim`` and asserts
         ``embed_dim % num_heads == 0`` afterwards (analogous to GroupNorm).
         """
-        layer = cast(torch.nn.MultiheadAttention, self.data.module)
+        layer = cast("torch.nn.MultiheadAttention", self.data.module)
         e = layer.embed_dim
         hd = self._hd()
         num_heads = layer.num_heads
@@ -1394,17 +1391,17 @@ class ModuleGraph(Graph):
                 ]
                 if len(vertices) == 0:
                     continue
-                vertex = cast(ElementNode, vertices.pop())
+                vertex = cast("ElementNode", vertices.pop())
                 dependencies = []
                 for v in vertices:
                     for e in component.E():
                         if e.v[1] == v:
                             dependencies.append(
-                                Dependency(x=cast(ElementNode, e.v[0]), y=vertex)
+                                Dependency(x=cast("ElementNode", e.v[0]), y=vertex)
                             )
                         elif e.v[0] == v:
                             dependencies.append(
-                                Dependency(x=vertex, y=cast(ElementNode, e.v[1]))
+                                Dependency(x=vertex, y=cast("ElementNode", e.v[1]))
                             )
 
                     for dep in dependencies:

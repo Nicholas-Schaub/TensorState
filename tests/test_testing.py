@@ -1,18 +1,26 @@
 """Tests for the tensorstate.testing fixture package."""
 
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 import numpy as np
 import pytest
 import torch
-from torch.utils.data import TensorDataset
 
 from TensorState import testing as tst
 
+if TYPE_CHECKING:
+    from torch.utils.data import TensorDataset
+
 
 def test_tiny_dataset_deterministic_and_shape():
-    d1 = cast(TensorDataset, tst.tiny_dataset(n=32, channels=3, size=8, num_classes=5, seed=1))
-    d2 = cast(TensorDataset, tst.tiny_dataset(n=32, channels=3, size=8, num_classes=5, seed=1))
+    d1 = cast(
+        "TensorDataset",
+        tst.tiny_dataset(n=32, channels=3, size=8, num_classes=5, seed=1),
+    )
+    d2 = cast(
+        "TensorDataset",
+        tst.tiny_dataset(n=32, channels=3, size=8, num_classes=5, seed=1),
+    )
     assert len(d1) == 32
     x1, y1 = d1[0]
     x2, y2 = d2[0]
@@ -33,7 +41,10 @@ def test_tiny_dataset_seed_changes_output():
 
 
 def test_tiny_text_dataset_shapes():
-    d = cast(TensorDataset, tst.tiny_text_dataset(n=16, seq_len=12, vocab_size=32, num_classes=3, seed=0))
+    d = cast(
+        "TensorDataset",
+        tst.tiny_text_dataset(n=16, seq_len=12, vocab_size=32, num_classes=3, seed=0),
+    )
     assert len(d) == 16
     inp, tgt = d[0]
     assert inp.shape == (11,)
