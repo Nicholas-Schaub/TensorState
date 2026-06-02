@@ -231,10 +231,10 @@ custom check. For more information on `attach` and additional settings,
 please see the [TensorState reference](../reference/tensorstate.md).
 
 !!! note
-    The older `ts.build_efficiency_model(model, attach_to=["Conv2d"])`
-    call still works and dispatches to `ts.attach` internally. New code
-    should prefer `ts.attach`; `build_efficiency_model` will be removed
-    in a future release.
+The older `ts.build_efficiency_model(model, attach_to=["Conv2d"])`
+call still works and dispatches to `ts.attach` internally. New code
+should prefer `ts.attach`; `build_efficiency_model` will be removed
+in a future release.
 
 Now that the `efficiency_model` has been created, the `StateCaptureHook`'s
 will collect all states of the network as images are fed to the network.

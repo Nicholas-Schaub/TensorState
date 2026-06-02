@@ -1,10 +1,12 @@
 name: Docs
 
+# Docs keep push:[dev] so the gh-pages deploy step at the bottom of this
+# file still fires on push to dev. The build itself runs on PRs too so a
+# PR breaks gh-pages-ably before merge.
 on:
   push:
     branches: [master, main, dev]
   pull_request:
-    branches: [master, main, dev]
 
 permissions:
   contents: write

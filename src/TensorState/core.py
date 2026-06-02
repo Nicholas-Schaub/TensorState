@@ -1,3 +1,4 @@
+import contextlib
 import logging
 import re
 import warnings
@@ -9,6 +10,82 @@ import numpy as np
 import torch
 
 from TensorState.layers import Probe, StateCaptureHook
+
+
+def _model_cuda_device(model: torch.nn.Module) -> torch.device | None:
+    """Return the first CUDA device found on the model, or None."""
+    for p in model.parameters():
+        if p.device.type == "cuda":
+            return p.device
+    for b in model.buffers():
+        if b.device.type == "cuda":
+            return b.device
+    return None
+
+
+def _resolve_device(
+    spec: str | int | torch.device | None,
+    model: torch.nn.Module | None = None,
+) -> torch.device | None:
+    """Parse a memory_device spec into a CUDA torch.device, or None for host.
+
+    ``None`` (auto): use the model's CUDA device when the model is on CUDA;
+    otherwise stay on host. Explicit ``"gpu"`` picks cuda:0 if CUDA is
+    available regardless of where the model lives.
+    """
+    if spec is None:
+        return _model_cuda_device(model) if model is not None else None
+    if isinstance(spec, torch.device):
+        return spec if spec.type == "cuda" else None
+    if isinstance(spec, int):
+        return torch.device("cuda", spec)
+    if spec == "cpu":
+        return None
+    if spec == "gpu":
+        if model is not None:
+            dev = _model_cuda_device(model)
+            if dev is not None:
+                return dev
+        return torch.device("cuda", 0) if torch.cuda.is_available() else None
+    d = torch.device(spec)  # e.g. "cuda" or "cuda:1"
+    return d if d.type == "cuda" else None
+
+
+def _resolve_backend(
+    model: torch.nn.Module,
+    memory_device: str | int | torch.device | None,
+    backend: str | None,
+    storage_path: str | Path | None,
+    memory_limit: str | None,
+) -> tuple[torch.device | None, str]:
+    """Single source of truth: parse (device, backend) from user-facing args.
+
+    Default policy: on-disk-ish args -> ``"duckdb"``; CUDA device available ->
+    ``"gpu"``; else ``"host"``. Explicit ``backend`` always wins.
+    """
+    device = _resolve_device(memory_device, model)
+    on_disk = storage_path is not None or memory_limit is not None
+    if backend is None:
+        if on_disk:
+            backend = "duckdb"
+        elif device is not None:
+            backend = "gpu"
+        else:
+            backend = "host"
+    if backend not in ("gpu", "host", "duckdb"):
+        raise ValueError(
+            f"backend must be 'gpu' | 'host' | 'duckdb' | None, got {backend!r}"
+        )
+    if backend == "gpu" and (device is None or device.type != "cuda"):
+        raise ValueError(
+            "backend='gpu' requires CUDA; memory_device did not resolve to cuda"
+        )
+    if backend != "duckdb" and on_disk:
+        raise ValueError(
+            f"storage_path / memory_limit require backend='duckdb' (got {backend!r})"
+        )
+    return device, backend
+
 
 logging.basicConfig(
     format="%(asctime)s - %(name)-10s - %(levelname)-8s - %(message)s",
@@ -83,7 +160,7 @@ def network_efficiency(
     """
     # Extract efficiency values from a model with attached probes
     if isinstance(efficiencies, torch.nn.Module):
-        efficiencies = [p.efficiency() for p in layers(efficiencies).values()]
+        efficiencies = [p.efficiency() for p in layers(efficiencies).values()]  # ty: ignore[call-non-callable]  # Probe method shadowed by Module.__getattr__ -> Tensor|Module
     assert isinstance(efficiencies, list), (
         "Input must be a list or a module with attached state-capture hooks"
     )
@@ -168,8 +245,8 @@ def entropy(
     """
     if isinstance(model_or_counts, torch.nn.Module):
         if name is not None:
-            return layer(model_or_counts, name).entropy(alpha)
-        return {n: p.entropy(alpha) for n, p in _iter_probes(model_or_counts)}
+            return layer(model_or_counts, name).entropy(alpha)  # ty: ignore[call-non-callable]  # Probe method shadowed by Module.__getattr__ -> Tensor|Module
+        return {n: p.entropy(alpha) for n, p in _iter_probes(model_or_counts)}  # ty: ignore[call-non-callable]  # Probe method shadowed by Module.__getattr__ -> Tensor|Module
 
     if name is not None:
         raise TypeError("name= is only valid when the first argument is a model.")
@@ -266,9 +343,9 @@ def efficiency(
         ``reduce="geomean"``).
     """
     if name is not None:
-        return layer(model, name).efficiency(alpha1, alpha2)
+        return layer(model, name).efficiency(alpha1, alpha2)  # ty: ignore[call-non-callable]  # Probe method shadowed by Module.__getattr__ -> Tensor|Module
 
-    per_layer = {n: p.efficiency(alpha1, alpha2) for n, p in _iter_probes(model)}
+    per_layer = {n: p.efficiency(alpha1, alpha2) for n, p in _iter_probes(model)}  # ty: ignore[call-non-callable]  # Probe method shadowed by Module.__getattr__ -> Tensor|Module
 
     if reduce is None:
         return per_layer
@@ -318,7 +395,37 @@ def reset_efficiency_model(model: torch.nn.Module) -> None:
         model: Model to reset
     """
     for probe in layers(model).values():
-        probe.reset_states()
+        probe.reset_states()  # ty: ignore[call-non-callable]  # Probe method shadowed by Module.__getattr__ -> Tensor|Module
+
+
+def advance_step(model: torch.nn.Module) -> int:
+    """Bump the step counter on every attached probe atomically.
+
+    Call once per training step (typically after ``optimizer.step()``). For
+    probes attached with ``entropy_window_steps``, this also triggers the
+    sliding-window eviction. Returns the new shared step id; raises
+    ``RuntimeError`` if the probes are not in lockstep BEFORE the bump (no
+    probe is advanced when a desync is detected).
+
+    Args:
+        model: A model with attached probes.
+
+    Returns:
+        The new shared step id. Returns ``0`` if there are no probes.
+    """
+    probes = [(name, probe) for name, probe in _iter_probes(model)]
+    if not probes:
+        return 0
+    pre_ids = {p._step_id for _n, p in probes}
+    if len(pre_ids) != 1:
+        raise RuntimeError(
+            "probes desynced: pre-advance step_ids "
+            f"{sorted(pre_ids)}. All probes on a model must share a step_id."
+        )
+    new_id = 0
+    for _name, probe in probes:
+        new_id = probe.advance_step()  # ty: ignore[call-non-callable]  # Probe method shadowed by Module.__getattr__ -> Tensor|Module
+    return new_id
 
 
 class _Matcher:
@@ -419,7 +526,9 @@ def _attach_probes(
     *,
     when: str,
     storage_path: str | Path | None,
-    memory_device: str | int,
+    memory_device: torch.device | None,
+    backend: str,
+    entropy_window_steps: int | None,
     memory_limit: str | None,
     raise_on_capture_error: bool,
 ) -> torch.nn.Module:
@@ -429,45 +538,64 @@ def _attach_probes(
     Probes live in the top-level ``_tensorstate_probes`` ``ModuleDict`` so
     container modules (``nn.Sequential`` and friends) — whose ``forward``
     iterates their children — aren't disturbed by adding a child probe.
+
+    Mid-run re-attach is honored: any RemovableHandle from a prior attach is
+    explicitly removed (PyTorch does not auto-remove hooks on GC), and new
+    probes are seeded to the existing step_id so a subsequent
+    ``ts.advance_step`` stays in lockstep.
     """
     if when not in ("before", "after", "both"):
         raise ValueError(f"when must be 'before' | 'after' | 'both', got {when!r}")
 
-    model.state_capture_hooks = []
+    # Remove prior hooks BEFORE replacing the registry. Without this,
+    # PyTorch's _forward_hooks dict still holds the old probe references and
+    # they keep firing on the now-orphaned stores.
+    for h in getattr(model, "state_capture_hooks", []) or []:
+        with contextlib.suppress(Exception):
+            h.remove()
+
+    # Snapshot existing step_id (if any) BEFORE clearing the probe container.
+    existing_step = max(
+        (probe._step_id for _name, probe in _iter_probes(model)),
+        default=0,
+    )
+
+    model.state_capture_hooks = []  # ty: ignore[unresolved-attribute]
     model._tensorstate_probes = torch.nn.ModuleDict()
+
+    def _make(probe_name: str) -> StateCaptureHook:
+        probe = StateCaptureHook(
+            name=probe_name,
+            backend=backend,
+            memory_device=memory_device,
+            entropy_window_steps=entropy_window_steps,
+            disk_path=storage_path,
+            memory_limit=memory_limit,
+            raise_on_capture_error=raise_on_capture_error,
+        )
+        probe._step_id = existing_step
+        return probe
 
     for mod_name, module in targets:
         # ModuleDict keys cannot contain "."; sanitize the qualified name.
         base_key = (mod_name or "root").replace(".", "__")
 
         if when in ("before", "both"):
-            probe = StateCaptureHook(
-                name=str(mod_name) + "_pre_states",
-                disk_path=storage_path,
-                memory_device=memory_device,
-                raise_on_capture_error=raise_on_capture_error,
-                memory_limit=memory_limit,
-            )
+            probe = _make(str(mod_name) + "_pre_states")
             model._tensorstate_probes[f"{base_key}_pre"] = probe
-            model.state_capture_hooks.append(
+            model.state_capture_hooks.append(  # ty: ignore[call-non-callable,unresolved-attribute]
                 module.register_forward_pre_hook(probe._capture)
             )
 
         if when in ("after", "both"):
-            probe = StateCaptureHook(
-                name=str(mod_name) + "_post_states",
-                disk_path=storage_path,
-                memory_device=memory_device,
-                raise_on_capture_error=raise_on_capture_error,
-                memory_limit=memory_limit,
-            )
+            probe = _make(str(mod_name) + "_post_states")
             model._tensorstate_probes[f"{base_key}_post"] = probe
-            model.state_capture_hooks.append(
+            model.state_capture_hooks.append(  # ty: ignore[call-non-callable,unresolved-attribute]
                 module.register_forward_hook(probe._capture)
             )
 
     # Deprecated back-compat handle; new code should use TensorState.layers().
-    model.efficiency_layers = _DeprecatedProbeList(model)
+    model.efficiency_layers = _DeprecatedProbeList(model)  # ty: ignore[unresolved-attribute]
     return model
 
 
@@ -477,7 +605,9 @@ def attach(
     *,
     when: str = "after",
     storage_path: str | Path | None = None,
-    memory_device: str | int = "cpu",
+    memory_device: str | int | torch.device | None = None,
+    backend: str | None = None,
+    entropy_window_steps: int | None = None,
     memory_limit: str | None = None,
     raise_on_capture_error: bool = False,
 ) -> torch.nn.Module:
@@ -492,35 +622,44 @@ def attach(
             where=ts.match(types=(nn.Conv2d, nn.Linear))
                   & ts.match(name=r"^backbone\\."),
             when="after",
-            memory_limit="4GB",
+            backend="gpu",
+            entropy_window_steps=1000,
         )
-
-    This is the new public attach API; :func:`build_efficiency_model` is a
-    legacy shim that translates its string-list ``attach_to`` argument to a
-    predicate and delegates here.
 
     Args:
         model: A PyTorch ``nn.Module``.
         where: A ``(name, module) -> bool`` callable (use :func:`match`).
         when: ``"before"``, ``"after"``, or ``"both"``.
         storage_path: Directory under which to back the DuckDB store with an
-            on-disk database. In-memory if ``None``.
-        memory_device: ``"cpu"`` or ``"gpu"`` — controls the GPU-resident
-            compressed-state cache.
+            on-disk database. Implies ``backend="duckdb"``.
+        memory_device: ``None`` (auto: model's CUDA device if any, else CPU),
+            ``"cpu"``, ``"gpu"``, a CUDA index, ``"cuda:N"``, or a
+            ``torch.device``.
+        backend: ``"gpu"`` | ``"host"`` | ``"duckdb"`` | ``None`` (auto).
+            Auto picks ``"duckdb"`` when ``storage_path``/``memory_limit`` is
+            set, otherwise ``"gpu"`` when CUDA is available, else ``"host"``.
+        entropy_window_steps: When set, ``ts.advance_step(model)`` evicts
+            microstates older than this many steps. ``None`` keeps everything.
         memory_limit: DuckDB ``memory_limit`` PRAGMA value (e.g. ``"4GB"``).
-        raise_on_capture_error: When ``True``, a capture failure aborts the
-            next capture call by re-raising the stored error.
+            Implies ``backend="duckdb"``.
+        raise_on_capture_error: DuckDB-only. Informational under the
+            synchronous capture path (failures surface directly).
 
     Returns:
         ``model`` (modified in place) with probes attached.
     """
+    device, resolved_backend = _resolve_backend(
+        model, memory_device, backend, storage_path, memory_limit
+    )
     targets = _iter_targets(model, where)
     return _attach_probes(
         model,
         targets,
         when=when,
         storage_path=storage_path,
-        memory_device=memory_device,
+        memory_device=device,
+        backend=resolved_backend,
+        entropy_window_steps=entropy_window_steps,
         memory_limit=memory_limit,
         raise_on_capture_error=raise_on_capture_error,
     )
@@ -535,11 +674,9 @@ def _pt_efficiency_model(
     memory_device,
     raise_on_capture_error,
     memory_limit,
+    backend,
+    entropy_window_steps,
 ):
-    # Translate the legacy attach_to / exclude string-list API to a predicate
-    # and reuse the shared _attach_probes machinery. Preserves the historical
-    # selection semantics: a module matches if its class name OR its qualified
-    # name is in attach_to (and its name is not in exclude).
     attach_set = set(attach_to) if not isinstance(attach_to, str) else {attach_to}
     exclude_set = set(exclude)
 
@@ -548,12 +685,17 @@ def _pt_efficiency_model(
             return False
         return m.__class__.__name__ in attach_set or n in attach_set
 
+    device, resolved_backend = _resolve_backend(
+        model, memory_device, backend, storage_path, memory_limit
+    )
     return _attach_probes(
         model,
         _iter_targets(model, legacy_where),
         when=method,
         storage_path=storage_path,
-        memory_device=memory_device,
+        memory_device=device,
+        backend=resolved_backend,
+        entropy_window_steps=entropy_window_steps,
         memory_limit=memory_limit,
         raise_on_capture_error=raise_on_capture_error,
     )
@@ -565,8 +707,10 @@ def build_efficiency_model(
     exclude: list[str] | str | None = None,
     method: str = "after",
     storage_path: str | Path | None = None,
-    memory_device: str | int = "cpu",
+    memory_device: str | int | torch.device | None = "cpu",
     *,
+    backend: str | None = None,
+    entropy_window_steps: int | None = None,
     memory_limit: str | None = None,
     raise_on_capture_error: bool = False,
 ) -> torch.nn.Module:
@@ -598,6 +742,13 @@ def build_efficiency_model(
             in memory.
         memory_device: "cpu" or "gpu". When "gpu" and torch.cuda is available,
             the state cache is held on GPU before transferring to main memory.
+        backend: Storage backend for captured microstates. One of ``"gpu"``,
+            ``"host"``, ``"duckdb"``, or ``None`` to auto-pick based on
+            ``memory_device`` / ``storage_path``.
+        entropy_window_steps: When set, the probe maintains a sliding
+            window of this many ``ts.advance_step`` ticks; older states
+            are evicted on each advance. ``None`` (default) disables
+            windowing and the store retains every captured state.
         memory_limit: DuckDB ``memory_limit`` PRAGMA value, e.g. ``"4GB"``.
             When the resident state table grows past this, DuckDB spills to a
             temp directory. ``None`` (the default) leaves DuckDB's own default
@@ -640,6 +791,8 @@ def build_efficiency_model(
             memory_device,
             raise_on_capture_error,
             memory_limit,
+            backend,
+            entropy_window_steps,
         )
     else:
         raise TypeError(
@@ -664,19 +817,18 @@ def remove_state_layers(model: torch.nn.Module) -> torch.nn.Module:
     """
     if hasattr(model, "state_capture_hooks"):
         # Runtime-added attribute; ty sees nn.Module.__getattr__'s union type.
-        hooks: list = model.state_capture_hooks
+        hooks: list = model.state_capture_hooks  # ty: ignore[invalid-assignment]
         for hook in hooks:
             hook.remove()
         del model.state_capture_hooks
         del model.efficiency_layers
 
     # Drop the probe container (probes live here, off the forward path).
-    # Close each probe's state store first so on-disk DuckDB files are released.
+    # Capture is synchronous so no thread join is needed; we don't close the
+    # stores either -- existing references to detached probes should still
+    # read consistent state_count values. Stores get GC'd along with probes
+    # when no external reference remains.
     if hasattr(model, "_tensorstate_probes"):
-        for probe in model._tensorstate_probes.values():
-            store = getattr(probe, "_store", None)
-            if store is not None:
-                store.close()
         del model._tensorstate_probes
 
     for _name, child in model._modules.items():

@@ -8,6 +8,55 @@ version semantics.
 
 ## [Unreleased]
 
+## \[0.6.0\] — sliding-window storage for live training
+
+Live-training-friendly refinement of the 0.5 capture pipeline. The
+single DuckDB store is now one of three pluggable backends, the probe
+maintains a bounded step-keyed sliding window, and training loops drive
+eviction explicitly via `ts.advance_step`. `layers.py` collapses from
+~700 lines to ~353 without losing functionality.
+
+### Added
+
+- **Three storage backends behind the probe**, sharing one informal
+  contract (`append(step_id, packed_unique)`, `evict_before(min_step)`,
+  `unique_in_window(min_step)`, `unique_counts_in_window`,
+  `state_count`, `close`) so probe code is identical across them:
+  - `GPUMemoryStore` — bit-packed uint8 rows on a CUDA tensor; uses
+    `torch.searchsorted` for the windowed read. Fastest path when the
+    capture stays on device.
+  - `HostMemoryStore` — numpy-backed equivalent for the CPU case.
+  - `_StateStore` — the existing DuckDB backend, kept for unbounded
+    captures and on-disk runs (`storage_path=` / `memory_limit=`).
+- **`ts.attach(..., backend=)`** picks the backend explicitly. `None`
+  (default) auto-selects: `"duckdb"` if `storage_path` / `memory_limit`
+  are set, `"gpu"` if `memory_device` resolves to CUDA, else `"host"`.
+- **`ts.attach(..., entropy_window_steps=N)`** turns on the step-keyed
+  sliding window. The probe retains states from the most recent `N`
+  step ticks; older states are dropped on each advance.
+- **`ts.advance_step(model)`** — two-phase verify-then-mutate. First
+  resolves the step on every probe to catch any that have desynced,
+  then increments atomically and triggers eviction on windowed probes.
+  Exported at the top-level package.
+- Targeted tests: `tests/test_stores.py` (21 cases against the shared
+  backend contract, GPU cases gated on CUDA) and
+  `tests/test_advance_step.py` (14 cases covering windowing,
+  re-attach semantics, and step-counter atomicity).
+
+### Changed
+
+- **`StateCaptureHook` collapsed.** The `AbstractStateCapture` ↔ hook
+  split is gone; one probe class now owns its store via composition.
+  Net effect in `layers.py`: -758 / +528 lines.
+- **`build_efficiency_model`** docstring lists the new `backend` and
+  `entropy_window_steps` kwargs.
+
+### Fixed
+
+- **Teardown race on DuckDB close.** Background capture threads could
+  write to a closed connection during `remove_state_layers`;
+  `_wait_for_threads()` now runs before `store.close()`.
+
 ## [0.5.0] — modernization release
 
 Stable release. The bulk of the modernization (Rust CPU extension,

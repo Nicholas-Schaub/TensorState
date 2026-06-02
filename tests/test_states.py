@@ -59,6 +59,7 @@ def test_roundtrip_partial_byte(num_neurons, dtype):
     """
     mask, payload = _make_input("numpy", num_neurons, dtype=dtype)
     compressed = States.compress_states(payload)
+    assert isinstance(compressed, np.ndarray)
     decompressed = States.decompress_states(compressed, num_neurons=num_neurons)
     assert np.all(mask == decompressed)
 

@@ -35,6 +35,7 @@ def _fake_module_data(module: torch.nn.Module) -> ModuleData:
     # Use a real grad_fn from a small operation so the BaseModel validator
     # is happy. The graph traversal path is not exercised in these unit tests.
     y = (torch.ones(1, requires_grad=True) * 2).clone()
+    assert y.grad_fn is not None
     return ModuleData(name=y.grad_fn.name(), grad_fn=y.grad_fn, module=module)
 
 
@@ -148,6 +149,7 @@ def test_linear_destroy_inputs_removes_columns():
 
 def test_conv_merge_outputs_averages_4d_weight():
     layer = torch.nn.Conv2d(3, 8, kernel_size=3, bias=True)
+    assert layer.bias is not None
     original = layer.weight.data.clone()
     original_bias = layer.bias.data.clone()
     node = ConvNode(_fake_module_data(layer))
@@ -230,6 +232,8 @@ def test_convgroup_depthwise_forward_invariant_and_structure():
     prod = torch.nn.Conv2d(3, 8, kernel_size=3, padding=1)
     dw = torch.nn.Conv2d(8, 8, kernel_size=3, padding=1, groups=8)
     cons = torch.nn.Conv2d(8, 4, kernel_size=3, padding=1)
+    assert prod.bias is not None
+    assert dw.bias is not None
 
     # Channels 1 and 4 identical through the full linked group.
     prod.weight.data[4] = prod.weight.data[1].clone()
@@ -274,6 +278,7 @@ def test_convtranspose_forward_invariant(tconv_kwargs):
     torch.manual_seed(0)
     prod = torch.nn.ConvTranspose2d(3, 8, **tconv_kwargs)
     cons = torch.nn.Conv2d(8, 4, kernel_size=3, padding=1)
+    assert prod.bias is not None
 
     # Out-channel axis is dim 1 for transposed weights.
     prod.weight.data[:, 4] = prod.weight.data[:, 1].clone()
@@ -303,6 +308,8 @@ def test_convtranspose_forward_invariant(tconv_kwargs):
 
 def test_batchnorm_merge_outputs_averages_all_four():
     bn = torch.nn.BatchNorm2d(8)
+    assert bn.running_mean is not None
+    assert bn.running_var is not None
     bn.weight.data = torch.arange(8, dtype=torch.float32)
     bn.bias.data = torch.arange(8, dtype=torch.float32) * 2
     bn.running_mean.data = torch.arange(8, dtype=torch.float32) * 3

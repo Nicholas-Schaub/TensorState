@@ -1,10 +1,11 @@
 name: Lint
 
+# Run on push to protected branches AND on every PR. Dropping push:[dev]
+# avoids the double-run when a PR from dev is already open.
 on:
   push:
-    branches: [master, main, dev]
+    branches: [master, main]
   pull_request:
-    branches: [master, main, dev]
 
 jobs:
   pre-commit:

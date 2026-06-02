@@ -75,6 +75,7 @@ class LeNet5(nn.Module):
 
 
 # Create the PyTorch model
+print(f"Sending network to device: {dev}")
 model = LeNet5().to(dev)
 
 """ Train the model """
@@ -176,5 +177,5 @@ print(f"Network efficiency: {100 * network_efficiency:.1f}%")
 accuracy = np.sum(np.multiply(accuracies, nums)) / np.sum(nums)
 print(f"Network accuracy: {100 * accuracy:.1f}%")
 
-aIQ = ts.aIQ(network_efficiency, accuracy.cpu().item(), beta)
+aIQ = ts.aIQ(network_efficiency, float(accuracy), beta)
 print(f"aIQ: {100 * aIQ:.1f}%")
